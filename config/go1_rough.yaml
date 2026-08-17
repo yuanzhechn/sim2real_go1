@@ -1,0 +1,55 @@
+# 与 Multi_UnitreeGo1 Rough Manager-Based 环境对应的 sim2real 参数。
+# 真机运行前必须根据实际 Go1 的关节顺序、零位和控制器逐项标定。
+robot:
+  name: unitree_go1
+  control_dt: 0.02
+  joint_count: 12
+  # 必须与 Isaac Lab UNITREE_GO1_CFG 的关节顺序一致。
+  joint_names:
+    - FL_hip_joint
+    - FL_thigh_joint
+    - FL_calf_joint
+    - FR_hip_joint
+    - FR_thigh_joint
+    - FR_calf_joint
+    - RL_hip_joint
+    - RL_thigh_joint
+    - RL_calf_joint
+    - RR_hip_joint
+    - RR_thigh_joint
+    - RR_calf_joint
+  default_joint_pos: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 1.0, -1.5, -0.1, 1.0, -1.5]
+  action_scale: 0.25
+  use_default_offset: true
+
+observation:
+  # 顺序必须与 velocity_env_cfg.py 中的 policy 组一致。
+  terms: [base_lin_vel, base_ang_vel, projected_gravity, velocity_commands, joint_pos, joint_vel, actions, height_scan]
+  dimensions: [3, 3, 3, 3, 12, 12, 12, 187]
+  height_scan_clip: 1.0
+  history_length: 1
+  require_height_scan: true
+
+policy:
+  observation_dim: 235
+  action_dim: 12
+  hidden_layers: [512, 256, 128]
+  activation: elu
+  # 只限制真机发出的归一化动作，导出的网络仍保留原始输出。
+  action_clip: 1.0
+
+safety:
+  max_roll_rad: 0.7
+  max_pitch_rad: 0.7
+  max_joint_error_rad: 1.2
+  max_command_velocity: 1.0
+  max_action_delta: 0.25
+  stale_state_timeout_s: 0.15
+  require_enable_switch: true
+  stand_on_fault: true
+
+transport:
+  # dry_run 是唯一默认值。unitree_sdk 需要用户完成硬件适配后显式启用。
+  mode: dry_run
+  interface: eth0
+  state_timeout_s: 0.10
