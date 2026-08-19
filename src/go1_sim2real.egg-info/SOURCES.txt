@@ -6,6 +6,7 @@ src/go1_sim2real/bundle.py
 src/go1_sim2real/config.py
 src/go1_sim2real/observation.py
 src/go1_sim2real/policy.py
+src/go1_sim2real/remote.py
 src/go1_sim2real/runtime.py
 src/go1_sim2real/safety.py
 src/go1_sim2real/sensors.py
@@ -19,4 +20,5 @@ src/go1_sim2real.egg-info/top_level.txt
 tests/test_action.py
 tests/test_bundle.py
 tests/test_core.py
+tests/test_remote.py
 tests/test_unitree_transport.py

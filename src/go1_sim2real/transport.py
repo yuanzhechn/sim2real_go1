@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import importlib
 import json
 from pathlib import Path
+import struct
 import sys
 import time
 from typing import Any, Protocol
@@ -264,7 +265,18 @@ class UnitreeSdkTransport:
             raise ValueError(f"未知遥控器按键: {button_name}")
         return bool(self._remote_buttons(self._state.wirelessRemote) & (1 << bits[button_name]))
 
-    def _remote_safety_state(self) -> tuple[bool, bool]:
+    def _remote_axes(self) -> np.ndarray:
+        raw = bytes(int(value) & 0xFF for value in self._state.wirelessRemote)
+        if len(raw) < 24:
+            raise RuntimeError("LowState.wirelessRemote 少于 24 字节")
+        # xRockerBtnDataStruct: head[2], buttons(uint16), lx, rx, ry, analog_L2, ly.
+        lx, rx, ry, _analog_l2, ly = struct.unpack_from("<fffff", raw, 4)
+        axes = np.asarray([lx, ly, rx, ry], dtype=np.float32)
+        if not np.all(np.isfinite(axes)) or np.max(np.abs(axes)) > 1.5:
+            raise RuntimeError(f"遥控摇杆数据无效: {axes.tolist()}")
+        return np.clip(axes, -1.0, 1.0)
+
+    def _remote_safety_state(self, remote_axes: np.ndarray) -> tuple[bool, bool]:
         enable_pressed = self._button_pressed(str(self.config.get("enable_button", "L2")))
         emergency_pressed = self._button_pressed(
             str(self.config.get("emergency_stop_button", "B"))
@@ -276,6 +288,18 @@ class UnitreeSdkTransport:
         switch_mode = str(self.config.get("enable_switch_mode", "toggle"))
         if switch_mode == "hold":
             enabled = enable_pressed and not self._emergency_stop_latched
+        elif switch_mode == "program":
+            # 程序接管期间无需功能键；但必须先观察到摇杆连续回中，防止带着
+            # 非零速度指令启动。B 急停一旦锁存，只能重启程序清除。
+            deadband = float(self.config.get("remote_control", {}).get("deadband", 0.08))
+            centered = bool(np.max(np.abs(remote_axes[[0, 1, 2]])) <= deadband)
+            if not hasattr(self, "_remote_centered_frames"):
+                self._remote_centered_frames = 0
+            self._remote_centered_frames = self._remote_centered_frames + 1 if centered else 0
+            required = max(1, int(self.config.get("remote_startup_center_frames", 10)))
+            if self._remote_centered_frames >= required and not self._emergency_stop_latched:
+                self._enable_latched = True
+            enabled = self._enable_latched and not self._emergency_stop_latched
         elif switch_mode == "toggle":
             # 首帧只记录按键状态，避免程序启动时已经压住 L2 导致意外使能。
             if self._previous_enable_pressed is not None:
@@ -352,7 +376,8 @@ class UnitreeSdkTransport:
         ).reshape(3)
         cell_voltage = np.asarray(getattr(self._state.bms, "cell_vol", ()), dtype=np.float32)
         battery_voltage = float(np.sum(cell_voltage) / 1000.0) if np.any(cell_voltage > 0) else None
-        enable_switch, emergency_stop = self._remote_safety_state()
+        remote_axes = self._remote_axes()
+        enable_switch, emergency_stop = self._remote_safety_state(remote_axes)
         result = RobotState(
             base_lin_vel=auxiliary.base_lin_vel,
             base_ang_vel=angular_velocity,
@@ -371,6 +396,7 @@ class UnitreeSdkTransport:
             enable_switch=enable_switch,
             emergency_stop=emergency_stop,
             communication_ok=self._have_state,
+            remote_axes=remote_axes,
         )
         return result
 

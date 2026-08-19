@@ -22,7 +22,8 @@ def run_control_loop(
     control_dt: float,
     steps: int | None = None,
     action_clip: float = 1.0,
-    on_step: Callable[[int, str, np.ndarray, RobotState], None] | None = None,
+    on_step: Callable[[int, str, np.ndarray, RobotState, np.ndarray], None] | None = None,
+    command_provider: Callable[[RobotState], object] | None = None,
 ) -> None:
     if control_dt <= 0:
         raise ValueError("control_dt 必须大于 0")
@@ -42,7 +43,14 @@ def run_control_loop(
     try:
         while steps is None or step < steps:
             state = transport.read_state()
-            observation = observation_builder.build(state, command_array)
+            current_command = (
+                command_array
+                if command_provider is None
+                else np.asarray(command_provider(state), dtype=np.float32).reshape(-1)
+            )
+            if current_command.size != 3 or not np.all(np.isfinite(current_command)):
+                raise ValueError("动态速度指令必须是有限的 3 维向量")
+            observation = observation_builder.build(state, current_command)
             action = np.asarray(policy(observation), dtype=np.float32).reshape(-1)
             if action.size != 12 or not np.all(np.isfinite(action)):
                 raise ValueError(f"策略动作必须是有限的 12 维向量，实际维度为 {action.size}")
@@ -57,7 +65,7 @@ def run_control_loop(
                 else:
                     transport.send_action(filtered_action)
             if on_step is not None:
-                on_step(step, result.reason, filtered_action, state)
+                on_step(step, result.reason, filtered_action, state, current_command)
             step += 1
             next_tick += control_dt
             time.sleep(max(0.0, next_tick - time.monotonic()))

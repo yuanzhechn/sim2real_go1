@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import struct
 import time
 
 import numpy as np
@@ -172,4 +173,27 @@ def test_remote_l2_toggles_enable_and_b_latches_emergency_stop():
     assert not stopped.enable_switch
     transport._state.wirelessRemote = [0, 0, 0, 0] + [0] * 36
     assert transport.read_state().emergency_stop
+    transport.close()
+
+
+def test_program_mode_waits_for_centered_remote_then_auto_enables():
+    config = make_config()
+    config["transport"].update(
+        {
+            "enable_switch_mode": "program",
+            "remote_startup_center_frames": 2,
+            "remote_control": {"deadband": 0.08},
+        }
+    )
+    transport = UnitreeSdkTransport(config, FakeSdk, FakeAuxiliary())
+    raw = bytearray(40)
+    struct.pack_into("<fffff", raw, 4, 0.0, 0.0, 0.0, 0.0, 0.4)
+    transport._state.wirelessRemote = list(raw)
+    assert not transport.read_state().enable_switch
+    raw = bytearray(40)
+    transport._state.wirelessRemote = list(raw)
+    assert not transport.read_state().enable_switch
+    enabled = transport.read_state()
+    assert enabled.enable_switch
+    np.testing.assert_allclose(enabled.remote_axes, 0.0)
     transport.close()

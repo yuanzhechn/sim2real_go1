@@ -36,6 +36,7 @@ class RobotState:
     enable_switch: bool | None = None
     emergency_stop: bool = False
     communication_ok: bool = True
+    remote_axes: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         self.base_lin_vel = vector(self.base_lin_vel, 3, "base_lin_vel")
@@ -49,6 +50,8 @@ class RobotState:
             self.motor_temperatures = vector(self.motor_temperatures, 12, "motor_temperatures")
         if self.motor_modes is not None:
             self.motor_modes = vector(self.motor_modes, 12, "motor_modes")
+        if self.remote_axes is not None:
+            self.remote_axes = vector(self.remote_axes, 4, "remote_axes")
         scalar_values = (
             self.base_lin_vel,
             self.base_ang_vel,
@@ -65,5 +68,7 @@ class RobotState:
             scalar_state.append(self.auxiliary_timestamp)
         if self.battery_voltage is not None:
             scalar_state.append(self.battery_voltage)
+        if self.remote_axes is not None and not np.all(np.isfinite(self.remote_axes)):
+            raise ValueError("RobotState 遥控摇杆包含 NaN 或 Inf")
         if not np.all(np.isfinite(np.asarray(scalar_state, dtype=np.float64))):
             raise ValueError("RobotState 标量状态包含 NaN 或 Inf")

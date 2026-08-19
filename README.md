@@ -72,6 +72,20 @@ python3 scripts/read_robot_state.py \
 `hardware_validated` 改为 `true`。真机运行还必须同时传入 `--enable-hardware`，并建议
 始终使用 `--log-jsonl`。默认配置故意无法启动真机。
 
-真机遥控安全逻辑默认为 `toggle`：程序启动时策略关闭；松开后按一次 `L2` 开启，
-再按一次关闭。`B` 是锁存急停，按下后即使松开也不会恢复，必须退出并重新启动程序。
-`--steps 0` 表示持续运行，按 `Ctrl-C` 也会进入退出阻尼流程。
+真机默认由遥控摇杆直接产生模型的速度指令：左摇杆上下控制前后、左右控制横移，
+右摇杆左右控制偏航。启动时必须先让摇杆连续回中，随后自动使能，不要求持续按键。
+`B` 是锁存急停，按下后即使松开也不会恢复，必须退出并重新启动程序。
+
+使用下面的包装脚本运行真机。配置、bundle、SHA 和模型签名均通过且模型完成预热后，
+它才停止原厂 sport mode 及其自动拉起守护进程；策略正常退出、异常退出或收到
+`Ctrl-C` 后自动恢复原厂模式：
+
+```bash
+scripts/run_hardware_with_remote.sh \
+  --bundle artifacts/go1_sim2real_bundle \
+  --config config/my_go1.yaml \
+  --steps 0 \
+  --log-jsonl hardware-run.jsonl
+```
+
+`--steps 0` 表示持续运行。不要绕过包装脚本同时运行 `Legged_sport` 和低层策略。

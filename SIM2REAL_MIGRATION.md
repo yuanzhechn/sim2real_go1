@@ -120,10 +120,11 @@ dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络
 2. 读取 IMU 的 wxyz 四元数、角速度和 roll/pitch，并计算 projected gravity；
 3. 将归一化动作映射成目标角，转换关节顺序/方向/零位后发送 q、dq、Kp、Kd、tau；
 4. 调用 SDK PositionLimit/PowerProtect，检测 UDP 错误和 LowState tick 超时；
-5. 解析遥控器按键作为保持式使能和急停；
+5. 解析遥控器摇杆并按可配置死区/比例生成 vx、vy、yaw 指令，B 键作为锁存急停；
 6. 故障与进程退出时发送阻尼模式，SDK 支持时启用断连 watchdog；
 7. 提供严格只读、绝不发送命令的状态检查脚本。
-8. 真机命令模式启动前检查并拒绝与本机 `Legged_sport` 进程并发。
+8. 真机命令模式启动前检查并拒绝与本机 `Legged_sport` 进程并发；包装脚本在模型
+   完成加载和预热后停止原厂 sport 守护进程，并在策略退出后恢复。
 
 仍需在目标机安装/构建低层 `robot_interface`，并验证固件兼容性、UDP 地址、按键、
 关节方向、零位和 PD。默认配置中的 `hardware_validated: false` 会阻止真机启动。

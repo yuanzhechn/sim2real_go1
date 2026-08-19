@@ -96,9 +96,15 @@ transport:
   rpy_signs: [1, 1, 1]
   angular_velocity_signs: [1, 1, 1]
   enable_button: L2
-  # toggle: 按一次使能，再按一次关闭；启动时始终为关闭状态。
-  enable_switch_mode: toggle
+  # program: 程序接管期间摇杆直接控制策略；启动时必须先保持摇杆回中。
+  enable_switch_mode: program
+  remote_startup_center_frames: 10
   emergency_stop_button: B
+  remote_control:
+    # [vx, vy, yaw_rate] 最大幅值；正号映射为 [ly, -lx, -rx]。
+    deadband: 0.08
+    scales: [0.5, 0.3, 0.5]
+    signs: [1, -1, -1]
   power_protect_level: 1
   fault_damping_kd: 1.0
   shutdown_damping_packets: 5
