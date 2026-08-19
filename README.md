@@ -11,6 +11,57 @@ Unitree Go1 的 sim2real 运行层，连接 Isaac Lab 训练策略与真实机�
 - 235 维 Rough 观测拼接器；
 - skrl PPO checkpoint 到 TorchScript 的导出；
 - Go1 动作映射和安全层；
-- dry-run、JSONL 回放和 Unitree SDK 适配入口。
+- dry-run、JSONL 回放和 Unitree Go1 低层 SDK transport；
+- 外部里程计/187 点高度扫描 UDP 接口；
+- 遥控器使能、急停、通信 watchdog、安全阻尼退出和真机日志。
 
 默认运行模式是 dry-run，不会发送任何机器人控制包。
+
+## 快速验证
+
+```bash
+conda env create -f environment.yml
+conda activate go1-sim2real
+python -m pip install -e . --no-deps
+python -m pytest -q
+python scripts/run_runtime.py \
+  --policy artifacts/go1_rough_policy.ts \
+  --config config/go1_rough.yaml \
+  --dry-run --steps 100
+```
+
+## 真机接入
+
+Go1 使用 `unitree_legged_sdk`（不是面向 Go2 的 sdk2）。先构建官方 Go1 分支的低层
+Python wrapper；仓库脚本会应用 Python 3.11/现代 pybind11 所需的最小 CMake 兼容补丁：
+
+```bash
+git clone --branch go1 https://github.com/unitreerobotics/unitree_legged_sdk.git ../unitree_legged_sdk
+conda activate go1-sim2real
+scripts/build_unitree_sdk.sh ../unitree_legged_sdk
+```
+
+将输出的 `lib/python/arm64` 绝对路径填入 `transport.sdk_python_path`，确认可导入
+`robot_interface`。复制配置文件后逐项
+标定 `sdk_joint_names`、方向、零位、关节限位和 PD 参数。只读检查不会发送任何控制包：
+
+```bash
+python3 scripts/read_robot_state.py \
+  --config config/my_go1.yaml \
+  --enable-hardware-read
+```
+
+发送低层命令前必须按 Unitree 的安全流程停止本机 `Legged_sport`；运行层默认也会检查
+并拒绝两者并发。只读检查不要求停止该进程，但可能需要为本机 UDP 端口选择未占用值。
+
+当前 Rough 策略必须接收真实的机身坐标系线速度与 187 点高度扫描。感知进程需向
+`transport.auxiliary_state.bind_port` 发送一帧一个 UDP JSON 包：
+
+```json
+{"base_lin_vel":[0.0,0.0,0.0],"height_scan":["严格按训练顺序排列的 187 个数值"]}
+```
+
+只有完成文档中的逐关节、坐标系、急停和吊挂验证后，才能把副本配置中的
+`transport.mode` 改为 `unitree_sdk`、填写非空 `calibration_id` 并将
+`hardware_validated` 改为 `true`。真机运行还必须同时传入 `--enable-hardware`，并建议
+始终使用 `--log-jsonl`。默认配置故意无法启动真机。

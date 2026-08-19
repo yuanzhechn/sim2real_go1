@@ -32,12 +32,25 @@ class SafetySupervisor:
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = bool(enabled)
 
+    def reset(self) -> None:
+        self._last_action.fill(0.0)
+
     def validate(self, state: RobotState, action: object) -> SafetyResult:
         now = time.monotonic()
+        if state.emergency_stop:
+            return SafetyResult(False, "emergency_stop")
+        if not state.communication_ok:
+            return SafetyResult(False, "communication_error")
         if not self._enabled:
+            return SafetyResult(False, "enable_switch_off")
+        if state.enable_switch is False:
             return SafetyResult(False, "enable_switch_off")
         if now - state.timestamp > float(self.config.get("stale_state_timeout_s", 0.15)):
             return SafetyResult(False, "state_timeout")
+        if state.auxiliary_timestamp is not None and now - state.auxiliary_timestamp > float(
+            self.config.get("stale_auxiliary_timeout_s", 0.15)
+        ):
+            return SafetyResult(False, "auxiliary_state_timeout")
         if abs(state.roll) > float(self.config.get("max_roll_rad", 0.7)):
             return SafetyResult(False, "roll_limit")
         if abs(state.pitch) > float(self.config.get("max_pitch_rad", 0.7)):
@@ -46,6 +59,22 @@ class SafetySupervisor:
             self.config.get("max_joint_error_rad", 1.2)
         ):
             return SafetyResult(False, "joint_error_limit")
+        if np.max(np.abs(state.joint_vel)) > float(self.config.get("max_joint_velocity_rad_s", 30.0)):
+            return SafetyResult(False, "joint_velocity_limit")
+        if state.motor_temperatures is not None and np.max(state.motor_temperatures) > float(
+            self.config.get("max_motor_temperature_c", 70.0)
+        ):
+            return SafetyResult(False, "motor_temperature_limit")
+        if state.battery_voltage is not None and state.battery_voltage < float(
+            self.config.get("min_battery_voltage_v", 19.0)
+        ):
+            return SafetyResult(False, "battery_voltage_limit")
+        if state.motor_modes is not None and np.any(state.motor_modes == 0x08):
+            return SafetyResult(False, "motor_overheat_fault")
+        if state.motor_modes is not None:
+            allowed_modes = np.asarray(self.config.get("allowed_motor_modes", [0x00, 0x0A]))
+            if np.any(~np.isin(state.motor_modes, allowed_modes)):
+                return SafetyResult(False, "motor_mode_fault")
         action_array = np.asarray(action, dtype=np.float32).reshape(-1)
         if action_array.size != 12 or not np.all(np.isfinite(action_array)):
             return SafetyResult(False, "invalid_action")
@@ -63,4 +92,5 @@ class SafetySupervisor:
                 return limited, SafetyResult(True, "action_delta_limited")
             return limited, result
         # 归一化零动作为站立目标；发生故障时不继续跟踪策略动作。
+        self._last_action.fill(0.0)
         return np.zeros(12, dtype=np.float32), result

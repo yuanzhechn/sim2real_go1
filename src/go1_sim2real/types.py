@@ -29,6 +29,13 @@ class RobotState:
     roll: float = 0.0
     pitch: float = 0.0
     timestamp: float = field(default_factory=time.monotonic)
+    auxiliary_timestamp: float | None = None
+    motor_temperatures: np.ndarray | None = None
+    battery_voltage: float | None = None
+    motor_modes: np.ndarray | None = None
+    enable_switch: bool | None = None
+    emergency_stop: bool = False
+    communication_ok: bool = True
 
     def __post_init__(self) -> None:
         self.base_lin_vel = vector(self.base_lin_vel, 3, "base_lin_vel")
@@ -38,3 +45,25 @@ class RobotState:
         self.joint_vel = vector(self.joint_vel, 12, "joint_vel")
         self.last_action = vector(self.last_action, 12, "last_action")
         self.height_scan = vector(self.height_scan, 187, "height_scan")
+        if self.motor_temperatures is not None:
+            self.motor_temperatures = vector(self.motor_temperatures, 12, "motor_temperatures")
+        if self.motor_modes is not None:
+            self.motor_modes = vector(self.motor_modes, 12, "motor_modes")
+        scalar_values = (
+            self.base_lin_vel,
+            self.base_ang_vel,
+            self.projected_gravity,
+            self.joint_pos,
+            self.joint_vel,
+            self.last_action,
+            self.height_scan,
+        )
+        if not all(np.all(np.isfinite(value)) for value in scalar_values):
+            raise ValueError("RobotState 包含 NaN 或 Inf")
+        scalar_state = [self.roll, self.pitch, self.timestamp]
+        if self.auxiliary_timestamp is not None:
+            scalar_state.append(self.auxiliary_timestamp)
+        if self.battery_voltage is not None:
+            scalar_state.append(self.battery_voltage)
+        if not np.all(np.isfinite(np.asarray(scalar_state, dtype=np.float64))):
+            raise ValueError("RobotState 标量状态包含 NaN 或 Inf")

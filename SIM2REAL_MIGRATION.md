@@ -104,30 +104,37 @@ RR_hip, RR_thigh, RR_calf
 - 故障时输出零动作；
 - 使能开关。
 
-dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络控制包。当前单元测试共 4 项，已经全部通过。
+dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络控制包。测试还覆盖
+真机 transport 的关节重排、重力投影、目标/增益重排和只读零发送保证。
 
-## 3. 尚未完成的内容
+## 3. 真机适配实现与仍需现场完成的内容
 
 以下事项必须在真机测试前完成，目前不能视为已经实现。
 
-### 3.1 Unitree SDK 通信
+### 3.1 Unitree SDK 通信（代码已实现，现场验证未完成）
 
-`UnitreeSdkTransport` 目前是有意保留的占位类，调用后会抛出 `NotImplementedError`。当前容器也没有检测到 `unitree_sdk2py`、`unitree_legged_sdk` 或 `lcm`。
+`UnitreeSdkTransport` 已针对 Go1 的 `unitree_legged_sdk` 低层 Python wrapper
+（模块名 `robot_interface`）实现：
 
-需要根据实际 Go1 型号、机载计算机、固件和 SDK 版本实现：
+1. 读取并显式重排 12 个电机角度、速度、模式和温度；
+2. 读取 IMU 的 wxyz 四元数、角速度和 roll/pitch，并计算 projected gravity；
+3. 将归一化动作映射成目标角，转换关节顺序/方向/零位后发送 q、dq、Kp、Kd、tau；
+4. 调用 SDK PositionLimit/PowerProtect，检测 UDP 错误和 LowState tick 超时；
+5. 解析遥控器按键作为保持式使能和急停；
+6. 故障与进程退出时发送阻尼模式，SDK 支持时启用断连 watchdog；
+7. 提供严格只读、绝不发送命令的状态检查脚本。
+8. 真机命令模式启动前检查并拒绝与本机 `Legged_sport` 进程并发。
 
-1. 读取 12 个电机的角度、角速度和状态；
-2. 读取 IMU 姿态、角速度和加速度；
-3. 获取或估计机身线速度；
-4. 发送关节目标角、目标速度、Kp、Kd 和前馈项；
-5. 处理电机故障、通信错误和退出；
-6. 实现通信 watchdog、急停和安全停机。
+仍需在目标机安装/构建低层 `robot_interface`，并验证固件兼容性、UDP 地址、按键、
+关节方向、零位和 PD。默认配置中的 `hardware_validated: false` 会阻止真机启动。
 
-不能在没有实现这个类的情况下启动真机模式。
-
-### 3.2 高度扫描
+### 3.2 高度扫描（接入协议已实现，传感器投影仍需现场实现）
 
 当前 Rough 策略依赖 187 维高度扫描。Isaac Lab 中的 RayCaster 是理想仿真传感器，真实 Go1 不会自动拥有同样的数据。
+
+运行层已经提供 UDP JSON 辅助状态入口，同时接收机身线速度与 187 点扫描，并检查维度、
+有限值、更新延迟和单调时间戳。感知进程仍必须把真实雷达/深度相机数据转换成训练时
+完全一致的坐标系、采样点和顺序；运行层不会用零值替代真机扫描。
 
 可选方案：
 
@@ -137,7 +144,7 @@ dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络
 
 绝对不能把 187 维全部填零后直接把 Rough 模型放到复杂地形上。那等于改变了策略输入分布。
 
-### 3.3 状态估计和坐标系
+### 3.3 状态估计和坐标系（转换可配置，符号仍需现场验证）
 
 必须在真机上确认：
 
@@ -151,7 +158,7 @@ dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络
 
 仿真中这些值通常是理想值，真机中任何一个符号或坐标系错误，都可能让策略立即输出错误动作。
 
-### 3.4 实物参数标定
+### 3.4 实物参数标定（必须现场完成）
 
 还没有针对你的具体 Go1 完成：
 
@@ -193,7 +200,7 @@ sim2real/
 - PPO 训练代码；
 - `.pt` checkpoint 中的 optimizer/value 网络。
 
-机器人侧只需要与目标 CPU/Jetson 兼容的 Python、PyTorch、NumPy、PyYAML，以及具体 Unitree SDK 运行库。如果机载计算机资源不足，可以在外部 NUC/工控机运行推理和 SDK，通过网线连接 Go1。
+机器人侧只需要与目标 CPU/Jetson 兼容的 Python、PyTorch、NumPy、PyYAML，以及具体 Unitree SDK 运行库。仓库提供 `environment.yml`，当前 ARM64 CPU 环境选择 Python 3.11 和已验证的 conda-forge `pytorch-cpu` 2.7；这是基于当前包可用性与实测结果选择，不是策略本身强制要求 Python 3.11。如果机载计算机资源不足，可以在外部 NUC/工控机运行推理和 SDK，通过网线连接 Go1。
 
 ## 5. 迁移步骤
 
@@ -224,21 +231,11 @@ cd /workspace/sim2real
 
 启动时看到 `safety=action_delta_limited` 是动作渐变保护，动作会逐步增加，不代表模型加载失败。
 
-### 5.3 实现真机 transport
+### 5.3 配置并验证真机 transport
 
-在 [transport.py](src/go1_sim2real/transport.py) 中实现：
-
-```python
-class UnitreeSdkTransport:
-    def read_state(self) -> RobotState:
-        ...
-
-    def send_action(self, action: np.ndarray) -> None:
-        ...
-
-    def close(self) -> None:
-        ...
-```
+构建 Go1 `unitree_legged_sdk` 的 Python wrapper，并在复制出的真机配置中填写
+`sdk_python_path`、UDP 地址、关节重排/方向/零位、限位、PD 和外部感知端口。
+先运行 `scripts/read_robot_state.py --enable-hardware-read` 做无命令状态检查。
 
 约定：
 
@@ -371,14 +368,24 @@ class UnitreeSdkTransport:
 + dry-run/JSONL 验证
 ```
 
-还没有完成的是：
+代码层已经新增：
 
 ```text
-Unitree SDK 真机通信
-+ 真机状态估计
-+ 高度传感器适配
+Go1 unitree_legged_sdk 低层通信
++ 显式关节/IMU 转换
++ 外部速度和高度扫描协议
++ 遥控器使能/急停/watchdog/阻尼退出
++ 真机配置门和 JSONL 日志
+```
+
+仍必须在实物上完成的是：
+
+```text
++ SDK/固件通信实测
++ 真实状态估计器与高度传感器投影
 + 零位/关节方向/PD 标定
 + 吊挂测试和落地测试
 ```
 
-因此，当前版本可以作为真机开发基础，但还不是可以直接让 Go1 自主行走的最终版本。
+因此，软件 transport 已不再是占位类，但在验收清单的现场项目完成前，仍不能直接让
+Go1 自主行走。

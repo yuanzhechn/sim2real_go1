@@ -42,9 +42,14 @@ safety:
   max_roll_rad: 0.7
   max_pitch_rad: 0.7
   max_joint_error_rad: 1.2
+  max_joint_velocity_rad_s: 25.0
+  max_motor_temperature_c: 70.0
+  min_battery_voltage_v: 19.0
+  allowed_motor_modes: [0, 10]
   max_command_velocity: 1.0
   max_action_delta: 0.25
   stale_state_timeout_s: 0.15
+  stale_auxiliary_timeout_s: 0.15
   require_enable_switch: true
   stand_on_fault: true
 
@@ -53,3 +58,48 @@ transport:
   mode: dry_run
   interface: eth0
   state_timeout_s: 0.10
+  # 以下参数只有完成逐关节、IMU、PD、急停和吊挂验证后才允许启用。
+  hardware_validated: false
+  calibration_id: ""
+  sdk_module: robot_interface
+  sdk_python_path: ""
+  local_port: 8090
+  target_ip: 192.168.123.10
+  target_port: 8007
+  watchdog_timeout_s: 0.10
+  reject_sport_mode_process: true
+  # unitree_legged_sdk LowState 固定顺序：FR, FL, RR, RL。
+  sdk_joint_names:
+    - FR_hip_joint
+    - FR_thigh_joint
+    - FR_calf_joint
+    - FL_hip_joint
+    - FL_thigh_joint
+    - FL_calf_joint
+    - RR_hip_joint
+    - RR_thigh_joint
+    - RR_calf_joint
+    - RL_hip_joint
+    - RL_thigh_joint
+    - RL_calf_joint
+  # 下面仍是策略关节顺序（FL, FR, RL, RR），必须针对实物标定。
+  joint_directions: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  joint_offsets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  joint_lower_limits: [-1.047, -0.663, -2.721, -1.047, -0.663, -2.721, -1.047, -0.663, -2.721, -1.047, -0.663, -2.721]
+  joint_upper_limits: [1.047, 2.966, -0.837, 1.047, 2.966, -0.837, 1.047, 2.966, -0.837, 1.047, 2.966, -0.837]
+  # 占位初值不是实物标定结果；hardware_validated=false 会阻止误启动。
+  kp: [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
+  kd: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+  torque_ff: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  rpy_signs: [1, 1, 1]
+  angular_velocity_signs: [1, 1, 1]
+  enable_button: L2
+  emergency_stop_button: B
+  power_protect_level: 1
+  fault_damping_kd: 1.0
+  shutdown_damping_packets: 5
+  auxiliary_state:
+    mode: disabled
+    bind_host: 127.0.0.1
+    bind_port: 15001
+    timeout_s: 0.10

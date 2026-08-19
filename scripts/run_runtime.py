@@ -4,15 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
+import time
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from go1_sim2real.config import load_config
+from go1_sim2real.config import load_config, validate_hardware_config
 from go1_sim2real.observation import Go1ObservationBuilder
 from go1_sim2real.policy import TorchScriptPolicy
 from go1_sim2real.runtime import run_control_loop
@@ -28,6 +30,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--dry-run", action="store_true", help="使用安全的虚拟 transport")
     parser.add_argument("--state-jsonl", help="从 JSONL 状态日志回放，不连接真机")
+    parser.add_argument("--log-jsonl", help="记录每步状态、安全结果和动作（真机强烈建议启用）")
     parser.add_argument(
         "--enable-hardware",
         action="store_true",
@@ -42,6 +45,11 @@ def main() -> None:
         raise SystemExit("未显式指定 --dry-run，且配置 transport.mode 不是 unitree_sdk；为安全起见已停止")
     if not args.dry_run and not args.enable_hardware:
         raise SystemExit("真机模式必须显式添加 --enable-hardware；首次测试请使用 --dry-run")
+    if not args.dry_run:
+        try:
+            validate_hardware_config(config)
+        except ValueError as exc:
+            raise SystemExit(f"真机配置未通过安全校验: {exc}") from exc
 
     default_pos = np.asarray(config.robot["default_joint_pos"], dtype=np.float32)
     if args.state_jsonl:
@@ -57,25 +65,55 @@ def main() -> None:
         default_joint_pos=default_pos,
     )
     safety = SafetySupervisor(config.safety, default_pos)
-    # dry-run 不需要遥控器使能；真机必须由硬件适配层在确认后调用 set_enabled(True)。
-    if args.dry_run:
-        safety.set_enabled(True)
+    # 真机的逐帧遥控器状态仍由 SafetySupervisor 检查；这里仅打开软件总门。
+    safety.set_enabled(True)
 
-    def report(step: int, reason: str, action: np.ndarray) -> None:
+    max_command = float(config.safety.get("max_command_velocity", 1.0))
+    if np.max(np.abs(np.asarray(args.command, dtype=np.float32))) > max_command:
+        raise SystemExit(f"速度指令超过 safety.max_command_velocity={max_command}")
+
+    log_stream = open(args.log_jsonl, "a", encoding="utf-8", buffering=1) if args.log_jsonl else None
+
+    def report(step: int, reason: str, action: np.ndarray, state) -> None:
         if step < 5 or step % 50 == 0:
             print(f"step={step:06d} safety={reason} action_max={np.max(np.abs(action)):.3f}")
+        if log_stream is not None:
+            record = {
+                "monotonic_time": time.monotonic(),
+                "step": step,
+                "safety": reason,
+                "command": list(args.command),
+                "action": action.tolist(),
+                "base_lin_vel": state.base_lin_vel.tolist(),
+                "base_ang_vel": state.base_ang_vel.tolist(),
+                "projected_gravity": state.projected_gravity.tolist(),
+                "joint_pos": state.joint_pos.tolist(),
+                "joint_vel": state.joint_vel.tolist(),
+                "height_scan": state.height_scan.tolist(),
+                "roll": state.roll,
+                "pitch": state.pitch,
+                "battery_voltage": state.battery_voltage,
+                "motor_temperatures": None if state.motor_temperatures is None else state.motor_temperatures.tolist(),
+                "enable_switch": state.enable_switch,
+                "emergency_stop": state.emergency_stop,
+            }
+            log_stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    run_control_loop(
-        transport=transport,
-        policy=policy,
-        observation_builder=builder,
-        safety=safety,
-        command=args.command,
-        control_dt=float(config.robot["control_dt"]),
-        steps=args.steps,
-        action_clip=float(config.policy.get("action_clip", 1.0)),
-        on_step=report,
-    )
+    try:
+        run_control_loop(
+            transport=transport,
+            policy=policy,
+            observation_builder=builder,
+            safety=safety,
+            command=args.command,
+            control_dt=float(config.robot["control_dt"]),
+            steps=args.steps,
+            action_clip=float(config.policy.get("action_clip", 1.0)),
+            on_step=report,
+        )
+    finally:
+        if log_stream is not None:
+            log_stream.close()
 
 
 if __name__ == "__main__":

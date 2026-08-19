@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
 import json
+from pathlib import Path
+import sys
 import time
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
 from .types import RobotState
+from .action import Go1JointPositionMapper
+from .sensors import AuxiliaryStateProvider, UdpJsonAuxiliaryStateProvider
 
 
 class RobotTransport(Protocol):
@@ -47,6 +52,9 @@ class DryRunTransport:
 
     def close(self) -> None:
         return None
+
+    def enter_safe_mode(self, reason: str) -> None:
+        self.send_action(np.zeros(12, dtype=np.float32))
 
 
 class JsonlTransport:
@@ -86,12 +94,327 @@ class JsonlTransport:
     def close(self) -> None:
         return None
 
+    def enter_safe_mode(self, reason: str) -> None:
+        self.send_action(np.zeros(12, dtype=np.float32))
+
 
 class UnitreeSdkTransport:
-    """Unitree SDK 适配入口，避免在未完成适配时误发控制包。"""
+    """Unitree ``unitree_legged_sdk`` Go1 低层 UDP Python 适配器。
 
-    def __init__(self, *args, **kwargs) -> None:
-        raise NotImplementedError(
-            "尚未绑定具体 Unitree Go1 SDK。请在此类中实现状态读取、关节顺序转换和低层动作发送，"
-            "并保留上层 SafetySupervisor。"
+    Python 扩展模块在官方 SDK 中名为 ``robot_interface``。模块在构造时才导入，
+    因而 dry-run/回放不依赖 SDK。测试可通过 ``sdk_module`` 和
+    ``auxiliary_provider`` 注入无网络后端。
+    """
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        sdk_module: Any | None = None,
+        auxiliary_provider: AuxiliaryStateProvider | None = None,
+        require_auxiliary: bool = True,
+        allow_commands: bool = True,
+    ) -> None:
+        sdk_was_injected = sdk_module is not None
+        robot = config["robot"]
+        self.config = config["transport"]
+        self.safety_config = config["safety"]
+        self.policy_joint_names = list(robot["joint_names"])
+        self.sdk_joint_names = list(self.config["sdk_joint_names"])
+        if sorted(self.policy_joint_names) != sorted(self.sdk_joint_names):
+            raise ValueError("policy joint_names 与 transport.sdk_joint_names 必须是同一组关节")
+        self._policy_to_sdk = np.asarray(
+            [self.sdk_joint_names.index(name) for name in self.policy_joint_names], dtype=np.int64
         )
+        self._directions = np.asarray(self.config["joint_directions"], dtype=np.float32).reshape(12)
+        self._offsets = np.asarray(self.config["joint_offsets"], dtype=np.float32).reshape(12)
+        self._kp = np.asarray(self.config["kp"], dtype=np.float32).reshape(12)
+        self._kd = np.asarray(self.config["kd"], dtype=np.float32).reshape(12)
+        self._torque_ff = np.asarray(self.config["torque_ff"], dtype=np.float32).reshape(12)
+        self._joint_lower = np.asarray(self.config["joint_lower_limits"], dtype=np.float32).reshape(12)
+        self._joint_upper = np.asarray(self.config["joint_upper_limits"], dtype=np.float32).reshape(12)
+        numeric_arrays = (
+            self._directions, self._offsets, self._kp, self._kd, self._torque_ff,
+            self._joint_lower, self._joint_upper,
+        )
+        if not all(np.all(np.isfinite(values)) for values in numeric_arrays):
+            raise ValueError("真机标定数组包含 NaN 或 Inf")
+        if np.any(self._kp < 0) or np.any(self._kd < 0):
+            raise ValueError("Kp/Kd 不能为负数")
+        if np.any(self._joint_lower >= self._joint_upper):
+            raise ValueError("关节下限必须小于上限")
+        self._mapper = Go1JointPositionMapper(
+            robot["default_joint_pos"], action_scale=float(robot["action_scale"])
+        )
+        self._default_joint_pos = np.asarray(robot["default_joint_pos"], dtype=np.float32)
+        self._last_action = np.zeros(12, dtype=np.float32)
+        self._last_state_timestamp = 0.0
+        self._last_tick: int | None = None
+        self._closed = False
+        self._have_state = False
+        self._allow_commands = bool(allow_commands)
+
+        if (
+            self._allow_commands
+            and not sdk_was_injected
+            and bool(self.config.get("reject_sport_mode_process", True))
+        ):
+            self._assert_sport_mode_stopped()
+
+        if sdk_module is None:
+            module_path = str(self.config.get("sdk_python_path", "")).strip()
+            if module_path:
+                resolved = str(Path(module_path).expanduser().resolve())
+                if resolved not in sys.path:
+                    sys.path.insert(0, resolved)
+            module_name = str(self.config.get("sdk_module", "robot_interface"))
+            try:
+                sdk_module = importlib.import_module(module_name)
+            except ImportError as exc:
+                raise RuntimeError(
+                    f"无法导入 {module_name}；请按 unitree_legged_sdk 文档构建 Python wrapper，"
+                    "并设置 transport.sdk_python_path"
+                ) from exc
+        self._sdk = sdk_module
+        low_level = int(getattr(self._sdk, "LOWLEVEL", 0xFF))
+        local_port = int(self.config.get("local_port", 8090))
+        target_ip = str(self.config.get("target_ip", "192.168.123.10"))
+        target_port = int(self.config.get("target_port", 8007))
+        try:
+            self._udp = self._sdk.UDP(low_level, local_port, target_ip, target_port)
+        except TypeError as exc:
+            raise RuntimeError(
+                "robot_interface.UDP 构造签名不兼容；需要 Go1 unitree_legged_sdk v3.8.x Python wrapper"
+            ) from exc
+        disconnect_watchdog = getattr(self._udp, "SetDisconnectTime", None)
+        if disconnect_watchdog is not None:
+            disconnect_watchdog(
+                float(robot["control_dt"]), float(self.config.get("watchdog_timeout_s", 0.10))
+            )
+        self._cmd = self._sdk.LowCmd()
+        self._state = self._sdk.LowState()
+        init_cmd = getattr(self._udp, "InitCmdData", None)
+        if init_cmd is None:
+            init_cmd = getattr(self._udp, "initCommunicationLowCmdData", None)
+        if init_cmd is None:
+            raise RuntimeError("SDK UDP 对象缺少低层命令初始化方法")
+        init_cmd(self._cmd)
+        self._sdk_safety = None
+        if hasattr(self._sdk, "Safety") and hasattr(self._sdk, "LeggedType"):
+            self._sdk_safety = self._sdk.Safety(self._sdk.LeggedType.Go1)
+
+        if auxiliary_provider is None and require_auxiliary:
+            auxiliary = self.config.get("auxiliary_state", {})
+            if auxiliary.get("mode") != "udp_json":
+                raise ValueError("Rough 策略必须提供 auxiliary_state.mode=udp_json")
+            auxiliary_provider = UdpJsonAuxiliaryStateProvider(
+                bind_host=str(auxiliary.get("bind_host", "127.0.0.1")),
+                bind_port=int(auxiliary["bind_port"]),
+                timeout_s=float(auxiliary.get("timeout_s", 0.10)),
+            )
+        self._auxiliary_provider = auxiliary_provider
+
+    @staticmethod
+    def _assert_sport_mode_stopped() -> None:
+        for process_dir in Path("/proc").glob("[0-9]*"):
+            try:
+                command = process_dir.joinpath("cmdline").read_bytes().split(b"\0")
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+            if any(Path(value.decode("utf-8", errors="ignore")).name == "Legged_sport" for value in command):
+                raise RuntimeError(
+                    "检测到 Legged_sport 正在运行；禁止与低层电机控制并发。"
+                    "请按 Unitree 流程安全停止运动服务后再启动真机模式"
+                )
+
+    @staticmethod
+    def _projected_gravity(quaternion_wxyz: object) -> np.ndarray:
+        quaternion = np.asarray(quaternion_wxyz, dtype=np.float64).reshape(4)
+        norm = float(np.linalg.norm(quaternion))
+        if norm < 1e-6 or not np.isfinite(norm):
+            raise RuntimeError("IMU 四元数无效")
+        w, x, y, z = quaternion / norm
+        return np.asarray(
+            (
+                -2.0 * (x * z - w * y),
+                -2.0 * (y * z + w * x),
+                -(1.0 - 2.0 * (x * x + y * y)),
+            ),
+            dtype=np.float32,
+        )
+
+    @staticmethod
+    def _remote_buttons(remote: object) -> int:
+        raw = bytes(int(value) & 0xFF for value in remote)
+        if len(raw) < 4:
+            return 0
+        return raw[2] | (raw[3] << 8)
+
+    def _button_pressed(self, button_name: str) -> bool:
+        bits = {
+            "R1": 0, "L1": 1, "start": 2, "select": 3,
+            "R2": 4, "L2": 5, "F1": 6, "F2": 7,
+            "A": 8, "B": 9, "X": 10, "Y": 11,
+            "up": 12, "right": 13, "down": 14, "left": 15,
+        }
+        if button_name not in bits:
+            raise ValueError(f"未知遥控器按键: {button_name}")
+        return bool(self._remote_buttons(self._state.wirelessRemote) & (1 << bits[button_name]))
+
+    def _sdk_to_policy(self, values: object) -> np.ndarray:
+        sdk_values = np.asarray(values, dtype=np.float32).reshape(12)
+        return sdk_values[self._policy_to_sdk] * self._directions + self._offsets
+
+    def _policy_to_sdk_values(self, values: object) -> np.ndarray:
+        policy_values = np.asarray(values, dtype=np.float32).reshape(12)
+        sdk_values = np.empty(12, dtype=np.float32)
+        sdk_values[self._policy_to_sdk] = (policy_values - self._offsets) * self._directions
+        return sdk_values
+
+    def _policy_vector_to_sdk(self, values: object, signed: bool = False) -> np.ndarray:
+        policy_values = np.asarray(values, dtype=np.float32).reshape(12)
+        sdk_values = np.empty(12, dtype=np.float32)
+        if signed:
+            policy_values = policy_values * self._directions
+        sdk_values[self._policy_to_sdk] = policy_values
+        return sdk_values
+
+    def read_state(self) -> RobotState:
+        if self._closed:
+            raise RuntimeError("transport 已关闭")
+        recv_result = self._udp.Recv()
+        if isinstance(recv_result, int) and recv_result < 0:
+            raise ConnectionError(f"Unitree UDP Recv 失败: {recv_result}")
+        self._udp.GetRecv(self._state)
+        now = time.monotonic()
+        motor_states = list(self._state.motorState)[:12]
+        if len(motor_states) != 12:
+            raise RuntimeError("LowState.motorState 少于 12 个电机")
+        imu = self._state.imu
+        quaternion = np.asarray(imu.quaternion, dtype=np.float64).reshape(4)
+        if not np.all(np.isfinite(quaternion)) or np.linalg.norm(quaternion) < 0.5:
+            raise ConnectionError("尚未收到有效的 Unitree LowState")
+        tick = int(getattr(self._state, "tick", 0))
+        if self._last_tick is None or tick != self._last_tick:
+            self._last_tick = tick
+            self._last_state_timestamp = now
+            self._have_state = True
+
+        if self._auxiliary_provider is None:
+            from .sensors import AuxiliaryState
+
+            auxiliary = AuxiliaryState(np.zeros(3), np.zeros(187), now)
+        else:
+            auxiliary = self._auxiliary_provider.read()
+        sdk_pos = [float(motor.q) for motor in motor_states]
+        sdk_vel = [float(motor.dq) for motor in motor_states]
+        positions = self._sdk_to_policy(sdk_pos)
+        velocities = self._sdk_to_policy(sdk_vel) - self._offsets
+        rpy = np.asarray(imu.rpy, dtype=np.float32).reshape(3)
+        rpy_signs = np.asarray(self.config.get("rpy_signs", [1, 1, 1]), dtype=np.float32).reshape(3)
+        angular_velocity = np.asarray(imu.gyroscope, dtype=np.float32).reshape(3)
+        angular_velocity *= np.asarray(
+            self.config.get("angular_velocity_signs", [1, 1, 1]), dtype=np.float32
+        ).reshape(3)
+        cell_voltage = np.asarray(getattr(self._state.bms, "cell_vol", ()), dtype=np.float32)
+        battery_voltage = float(np.sum(cell_voltage) / 1000.0) if np.any(cell_voltage > 0) else None
+        result = RobotState(
+            base_lin_vel=auxiliary.base_lin_vel,
+            base_ang_vel=angular_velocity,
+            projected_gravity=self._projected_gravity(quaternion),
+            joint_pos=positions,
+            joint_vel=velocities,
+            last_action=self._last_action,
+            height_scan=auxiliary.height_scan,
+            roll=float(rpy[0] * rpy_signs[0]),
+            pitch=float(rpy[1] * rpy_signs[1]),
+            timestamp=self._last_state_timestamp,
+            auxiliary_timestamp=auxiliary.timestamp,
+            motor_temperatures=[float(motor.temperature) for motor in motor_states],
+            battery_voltage=battery_voltage,
+            motor_modes=[float(motor.mode) for motor in motor_states],
+            enable_switch=self._button_pressed(str(self.config.get("enable_button", "L2"))),
+            emergency_stop=self._button_pressed(str(self.config.get("emergency_stop_button", "B"))),
+            communication_ok=self._have_state,
+        )
+        return result
+
+    def _apply_sdk_safety(self) -> None:
+        if self._sdk_safety is None:
+            return
+        self._sdk_safety.PositionLimit(self._cmd)
+        power_factor = int(self.config.get("power_protect_level", 1))
+        result = self._sdk_safety.PowerProtect(self._cmd, self._state, power_factor)
+        if isinstance(result, int) and result < 0:
+            raise RuntimeError(f"Unitree SDK PowerProtect 拒绝命令: {result}")
+
+    def send_action(self, action: np.ndarray) -> None:
+        if not self._allow_commands:
+            raise PermissionError("此 transport 以只读模式打开，拒绝发送命令")
+        if self._closed:
+            raise RuntimeError("transport 已关闭")
+        if not self._have_state:
+            raise RuntimeError("尚未收到有效 LowState，拒绝发送电机命令")
+        normalized = np.asarray(action, dtype=np.float32).reshape(12)
+        if not np.all(np.isfinite(normalized)):
+            raise ValueError("动作包含 NaN 或 Inf")
+        target = self._mapper.to_joint_target(normalized)
+        target = np.clip(target, self._joint_lower, self._joint_upper)
+        sdk_target = self._policy_to_sdk_values(target)
+        sdk_kp = self._policy_vector_to_sdk(self._kp)
+        sdk_kd = self._policy_vector_to_sdk(self._kd)
+        sdk_tau = self._policy_vector_to_sdk(self._torque_ff, signed=True)
+        for index in range(12):
+            motor = self._cmd.motorCmd[index]
+            motor.mode = 0x0A
+            motor.q = float(sdk_target[index])
+            motor.dq = 0.0
+            motor.Kp = float(sdk_kp[index])
+            motor.Kd = float(sdk_kd[index])
+            motor.tau = float(sdk_tau[index])
+        self._apply_sdk_safety()
+        self._udp.SetSend(self._cmd)
+        send_result = self._udp.Send()
+        if isinstance(send_result, int) and send_result < 0:
+            raise ConnectionError(f"Unitree UDP Send 失败: {send_result}")
+        self._last_action = normalized.copy()
+
+    def _send_damping(self) -> None:
+        if not self._have_state or not self._allow_commands:
+            return
+        damping_kd = float(self.config.get("fault_damping_kd", 1.0))
+        for index in range(12):
+            motor = self._cmd.motorCmd[index]
+            motor.mode = 0x00
+            motor.q = 2.146e9
+            motor.dq = 16000.0
+            motor.Kp = 0.0
+            motor.Kd = damping_kd
+            motor.tau = 0.0
+        self._udp.SetSend(self._cmd)
+        self._udp.Send()
+
+    def enter_safe_mode(self, reason: str) -> None:
+        # 通信、急停、过热和姿态故障不应继续以位置环强制站立。
+        force_damping = {
+            "emergency_stop", "communication_error", "state_timeout",
+            "auxiliary_state_timeout", "motor_temperature_limit", "motor_overheat_fault",
+            "enable_switch_off", "roll_limit", "pitch_limit", "joint_error_limit",
+            "joint_velocity_limit", "motor_mode_fault",
+        }
+        if bool(self.safety_config.get("stand_on_fault", True)) and reason not in force_damping:
+            self.send_action(np.zeros(12, dtype=np.float32))
+        else:
+            self._send_damping()
+        self._last_action.fill(0.0)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            repeat = max(1, int(self.config.get("shutdown_damping_packets", 5)))
+            for _ in range(repeat):
+                self._send_damping()
+        finally:
+            self._closed = True
+            if self._auxiliary_provider is not None:
+                self._auxiliary_provider.close()
