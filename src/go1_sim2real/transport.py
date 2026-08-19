@@ -153,6 +153,9 @@ class UnitreeSdkTransport:
         self._have_state = False
         self._allow_commands = bool(allow_commands)
         self._bootstrap_sent = False
+        self._enable_latched = False
+        self._emergency_stop_latched = False
+        self._previous_enable_pressed: bool | None = None
 
         if (
             self._allow_commands
@@ -261,6 +264,30 @@ class UnitreeSdkTransport:
             raise ValueError(f"未知遥控器按键: {button_name}")
         return bool(self._remote_buttons(self._state.wirelessRemote) & (1 << bits[button_name]))
 
+    def _remote_safety_state(self) -> tuple[bool, bool]:
+        enable_pressed = self._button_pressed(str(self.config.get("enable_button", "L2")))
+        emergency_pressed = self._button_pressed(
+            str(self.config.get("emergency_stop_button", "B"))
+        )
+        if emergency_pressed:
+            self._emergency_stop_latched = True
+            self._enable_latched = False
+
+        switch_mode = str(self.config.get("enable_switch_mode", "toggle"))
+        if switch_mode == "hold":
+            enabled = enable_pressed and not self._emergency_stop_latched
+        elif switch_mode == "toggle":
+            # 首帧只记录按键状态，避免程序启动时已经压住 L2 导致意外使能。
+            if self._previous_enable_pressed is not None:
+                rising_edge = enable_pressed and not self._previous_enable_pressed
+                if rising_edge and not self._emergency_stop_latched:
+                    self._enable_latched = not self._enable_latched
+            enabled = self._enable_latched and not self._emergency_stop_latched
+        else:
+            raise ValueError(f"未知 enable_switch_mode: {switch_mode}")
+        self._previous_enable_pressed = enable_pressed
+        return enabled, self._emergency_stop_latched
+
     def _sdk_to_policy(self, values: object) -> np.ndarray:
         sdk_values = np.asarray(values, dtype=np.float32).reshape(12)
         return sdk_values[self._policy_to_sdk] * self._directions + self._offsets
@@ -325,6 +352,7 @@ class UnitreeSdkTransport:
         ).reshape(3)
         cell_voltage = np.asarray(getattr(self._state.bms, "cell_vol", ()), dtype=np.float32)
         battery_voltage = float(np.sum(cell_voltage) / 1000.0) if np.any(cell_voltage > 0) else None
+        enable_switch, emergency_stop = self._remote_safety_state()
         result = RobotState(
             base_lin_vel=auxiliary.base_lin_vel,
             base_ang_vel=angular_velocity,
@@ -340,8 +368,8 @@ class UnitreeSdkTransport:
             motor_temperatures=[float(motor.temperature) for motor in motor_states],
             battery_voltage=battery_voltage,
             motor_modes=[float(motor.mode) for motor in motor_states],
-            enable_switch=self._button_pressed(str(self.config.get("enable_button", "L2"))),
-            emergency_stop=self._button_pressed(str(self.config.get("emergency_stop_button", "B"))),
+            enable_switch=enable_switch,
+            emergency_stop=emergency_stop,
             communication_ok=self._have_state,
         )
         return result

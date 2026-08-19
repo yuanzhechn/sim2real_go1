@@ -118,7 +118,8 @@ def test_unitree_state_reorders_joints_and_projects_gravity():
     np.testing.assert_allclose(state.joint_pos, [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8])
     np.testing.assert_allclose(state.projected_gravity, [0, 0, -1])
     np.testing.assert_allclose(state.base_lin_vel, [0.4, 0, 0])
-    assert state.enable_switch
+    # 启动时即使 L2 已经按下也不能自动使能，必须先松开再重新按下。
+    assert not state.enable_switch
     assert not state.emergency_stop
     transport.close()
 
@@ -147,4 +148,28 @@ def test_command_transport_bootstraps_low_state_with_passive_packet():
     assert transport._udp.send_count == 1
     assert all(m.mode == 0x00 for m in transport._cmd.motorCmd[:12])
     assert all(m.Kp == 0.0 and m.Kd == 0.0 and m.tau == 0.0 for m in transport._cmd.motorCmd[:12])
+    transport.close()
+
+
+def test_remote_l2_toggles_enable_and_b_latches_emergency_stop():
+    transport = UnitreeSdkTransport(make_config(), FakeSdk, FakeAuxiliary())
+    assert not transport.read_state().enable_switch
+
+    transport._state.wirelessRemote = [0, 0, 0, 0] + [0] * 36
+    assert not transport.read_state().enable_switch
+    transport._state.wirelessRemote = [0, 0, 1 << 5, 0] + [0] * 36
+    assert transport.read_state().enable_switch
+    assert transport.read_state().enable_switch
+
+    transport._state.wirelessRemote = [0, 0, 0, 0] + [0] * 36
+    transport.read_state()
+    transport._state.wirelessRemote = [0, 0, 1 << 5, 0] + [0] * 36
+    assert not transport.read_state().enable_switch
+
+    transport._state.wirelessRemote = [0, 0, 0, 1 << 1] + [0] * 36
+    stopped = transport.read_state()
+    assert stopped.emergency_stop
+    assert not stopped.enable_switch
+    transport._state.wirelessRemote = [0, 0, 0, 0] + [0] * 36
+    assert transport.read_state().emergency_stop
     transport.close()

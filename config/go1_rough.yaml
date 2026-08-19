@@ -96,6 +96,8 @@ transport:
   rpy_signs: [1, 1, 1]
   angular_velocity_signs: [1, 1, 1]
   enable_button: L2
+  # toggle: 按一次使能，再按一次关闭；启动时始终为关闭状态。
+  enable_switch_mode: toggle
   emergency_stop_button: B
   power_protect_level: 1
   fault_damping_kd: 1.0

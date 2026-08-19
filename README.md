@@ -71,3 +71,7 @@ python3 scripts/read_robot_state.py \
 `transport.mode` 改为 `unitree_sdk`、填写非空 `calibration_id` 并将
 `hardware_validated` 改为 `true`。真机运行还必须同时传入 `--enable-hardware`，并建议
 始终使用 `--log-jsonl`。默认配置故意无法启动真机。
+
+真机遥控安全逻辑默认为 `toggle`：程序启动时策略关闭；松开后按一次 `L2` 开启，
+再按一次关闭。`B` 是锁存急停，按下后即使松开也不会恢复，必须退出并重新启动程序。
+`--steps 0` 表示持续运行，按 `Ctrl-C` 也会进入退出阻尼流程。

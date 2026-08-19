@@ -97,6 +97,8 @@ def validate_hardware_config(config: RuntimeConfig) -> None:
             raise ValueError(f"transport.{key} 必须包含 {length} 项")
     if any(float(value) not in (-1.0, 1.0) for value in transport["joint_directions"]):
         raise ValueError("transport.joint_directions 只能为 -1 或 1")
+    if transport.get("enable_switch_mode", "toggle") not in {"toggle", "hold"}:
+        raise ValueError("transport.enable_switch_mode 必须为 toggle 或 hold")
     if bool(config.observation.get("require_height_scan", True)):
         auxiliary = transport.get("auxiliary_state", {})
         if auxiliary.get("mode") != "udp_json":

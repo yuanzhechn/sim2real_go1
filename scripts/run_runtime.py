@@ -30,7 +30,7 @@ def main() -> None:
     model_source.add_argument("--bundle", help="加载并完整校验训练侧 sim2real bundle")
     parser.add_argument("--config", default=str(ROOT / "config/go1_rough.yaml"))
     parser.add_argument("--command", nargs=3, type=float, default=[0.2, 0.0, 0.0], metavar=("VX", "VY", "WZ"))
-    parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument("--steps", type=int, default=100, help="控制步数；0 表示持续运行")
     parser.add_argument("--dry-run", action="store_true", help="使用安全的虚拟 transport")
     parser.add_argument("--state-jsonl", help="从 JSONL 状态日志回放，不连接真机")
     parser.add_argument("--log-jsonl", help="记录每步状态、安全结果和动作（真机强烈建议启用）")
@@ -40,6 +40,8 @@ def main() -> None:
         help="显式确认启用真机控制；仅在完成 SDK 适配和吊挂测试后使用",
     )
     args = parser.parse_args()
+    if args.steps < 0:
+        raise SystemExit("--steps 不能为负数；使用 0 表示持续运行")
 
     config = load_config(args.config)
     policy_path = args.policy
@@ -133,7 +135,7 @@ def main() -> None:
             safety=safety,
             command=args.command,
             control_dt=float(config.robot["control_dt"]),
-            steps=args.steps,
+            steps=None if args.steps == 0 else args.steps,
             action_clip=float(config.policy.get("action_clip", 1.0)),
             on_step=report,
         )
