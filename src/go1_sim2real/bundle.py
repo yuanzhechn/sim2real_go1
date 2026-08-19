@@ -36,15 +36,26 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def load_bundle(path: str | Path) -> Sim2RealBundle:
     root = Path(path).expanduser().resolve()
     manifest_path = root / "manifest.json"
-    config_path = root / "config" / "go1_rough_sim2real.yaml"
     if not manifest_path.is_file():
         raise FileNotFoundError(f"bundle 缺少 manifest.json: {root}")
-    if not config_path.is_file():
-        raise FileNotFoundError(f"bundle 缺少训练规格配置: {config_path}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(manifest, dict):
         raise ValueError("bundle manifest 必须是 JSON 对象")
+    config_relative = manifest.get("config")
+    if config_relative is None:
+        candidates = sorted((root / "config").glob("*.yaml"))
+        if len(candidates) != 1:
+            raise ValueError("bundle manifest.config 缺失，且 config 目录不是唯一 YAML")
+        config_path = candidates[0].resolve()
+    else:
+        config_path = (root / str(config_relative)).resolve()
+    try:
+        config_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("bundle manifest.config 不能指向 bundle 目录外") from exc
+    if not config_path.is_file():
+        raise FileNotFoundError(f"bundle 缺少训练规格配置: {config_path}")
     policy_relative = manifest.get("policy")
     if not isinstance(policy_relative, str) or not policy_relative:
         raise ValueError("bundle manifest.policy 无效")
@@ -74,6 +85,15 @@ def _validate_internal_spec(manifest: dict[str, Any], config: dict[str, Any]) ->
         observation = config["observation"]
         policy = config["policy"]
         dimensions = [int(value) for value in observation["dimensions"]]
+        terms = observation.get("terms")
+        if terms is None and dimensions == [3, 3, 3, 3, 12, 12, 12, 187]:
+            # 兼容第一版 Rough bundle；新 bundle 必须显式导出 terms。
+            terms = [
+                "base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands",
+                "joint_pos", "joint_vel", "actions", "height_scan",
+            ]
+            observation["terms"] = terms
+        terms = list(terms)
         history_length = int(observation.get("history_length", 1))
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("bundle 训练配置缺少有效的 robot/observation/policy 规格") from exc
@@ -83,7 +103,7 @@ def _validate_internal_spec(manifest: dict[str, Any], config: dict[str, Any]) ->
         "action_dim": int(policy["action_dim"]),
         "hidden_layers": [int(value) for value in policy["hidden_layers"]],
         "action_scale": float(robot["action_scale"]),
-        "height_scan_dim": dimensions[-1],
+        "height_scan_dim": dimensions[terms.index("height_scan")] if "height_scan" in terms else 0,
     }
     if sum(dimensions) * history_length != checks["observation_dim"]:
         raise ValueError("bundle observation dimensions/history 与 policy.observation_dim 不一致")
@@ -99,7 +119,7 @@ def validate_bundle_runtime_config(bundle: Sim2RealBundle, runtime: RuntimeConfi
     """确保硬件运行配置没有改变模型训练时的输入输出语义。"""
 
     source = bundle.training_config
-    comparisons = (
+    comparisons = [
         ("robot.control_dt", source["robot"]["control_dt"], runtime.robot["control_dt"]),
         ("robot.joint_count", source["robot"]["joint_count"], runtime.robot["joint_count"]),
         ("robot.joint_names", source["robot"]["joint_names"], runtime.robot["joint_names"]),
@@ -114,11 +134,7 @@ def validate_bundle_runtime_config(bundle: Sim2RealBundle, runtime: RuntimeConfi
             source["observation"]["dimensions"],
             runtime.observation["dimensions"],
         ),
-        (
-            "observation.height_scan_clip",
-            source["observation"]["height_scan_clip"],
-            runtime.observation["height_scan_clip"],
-        ),
+        ("observation.terms", source["observation"]["terms"], runtime.observation["terms"]),
         (
             "observation.history_length",
             source["observation"]["history_length"],
@@ -128,7 +144,15 @@ def validate_bundle_runtime_config(bundle: Sim2RealBundle, runtime: RuntimeConfi
         ("policy.action_dim", source["policy"]["action_dim"], runtime.policy["action_dim"]),
         ("policy.hidden_layers", source["policy"]["hidden_layers"], runtime.policy["hidden_layers"]),
         ("policy.action_clip", source["policy"]["action_clip"], runtime.policy["action_clip"]),
-    )
+    ]
+    if "height_scan" in source["observation"]["terms"]:
+        comparisons.append(
+            (
+                "observation.height_scan_clip",
+                source["observation"]["height_scan_clip"],
+                runtime.observation.get("height_scan_clip"),
+            )
+        )
     for name, trained, deployed in comparisons:
         if isinstance(trained, (list, tuple)) or isinstance(deployed, (list, tuple)):
             matches = np.array_equal(np.asarray(trained), np.asarray(deployed))

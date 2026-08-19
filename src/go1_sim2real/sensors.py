@@ -1,4 +1,4 @@
-"""真实地形扫描和机身速度的外部状态入口。"""
+"""机身速度以及可选真实地形扫描的外部状态入口。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .types import vector
 
 @dataclass(frozen=True)
 class AuxiliaryState:
-    """与策略训练定义一致的机身速度和 187 点高度扫描。"""
+    """统一内部状态；Flat 策略会忽略占位的 height_scan 数组。"""
 
     base_lin_vel: np.ndarray
     height_scan: np.ndarray
@@ -38,11 +38,18 @@ class AuxiliaryStateProvider(Protocol):
 class UdpJsonAuxiliaryStateProvider:
     """接收感知/里程计进程发来的一帧一包 JSON UDP 数据。
 
-    数据格式为 ``{"base_lin_vel": [vx, vy, vz], "height_scan": [187 values]}``。
+    Rough 数据格式为 ``{"base_lin_vel": [...], "height_scan": [187 values]}``；
+    Flat policy 只要求 ``{"base_lin_vel": [vx, vy, vz]}``。
     时间戳使用本机收到数据包的单调时钟，避免混用不同机器的系统时钟。
     """
 
-    def __init__(self, bind_host: str, bind_port: int, timeout_s: float = 0.10) -> None:
+    def __init__(
+        self,
+        bind_host: str,
+        bind_port: int,
+        timeout_s: float = 0.10,
+        require_height_scan: bool = True,
+    ) -> None:
         self.timeout_s = float(timeout_s)
         if self.timeout_s <= 0:
             raise ValueError("auxiliary timeout_s 必须大于 0")
@@ -50,6 +57,20 @@ class UdpJsonAuxiliaryStateProvider:
         self._socket.bind((bind_host, int(bind_port)))
         self._socket.settimeout(self.timeout_s)
         self._latest: AuxiliaryState | None = None
+        self.require_height_scan = bool(require_height_scan)
+
+    def _decode(self, payload: bytes) -> AuxiliaryState:
+        message = json.loads(payload.decode("utf-8"))
+        if self.require_height_scan:
+            height_scan = message["height_scan"]
+        else:
+            # Flat policy 不消费该字段；内部 RobotState 仍保持统一形状。
+            height_scan = message.get("height_scan", [0.0] * 187)
+        return AuxiliaryState(
+            base_lin_vel=message["base_lin_vel"],
+            height_scan=height_scan,
+            timestamp=time.monotonic(),
+        )
 
     def read(self) -> AuxiliaryState:
         deadline = time.monotonic() + self.timeout_s
@@ -63,12 +84,7 @@ class UdpJsonAuxiliaryStateProvider:
             except socket.timeout:
                 break
             try:
-                message = json.loads(payload.decode("utf-8"))
-                self._latest = AuxiliaryState(
-                    base_lin_vel=message["base_lin_vel"],
-                    height_scan=message["height_scan"],
-                    timestamp=time.monotonic(),
-                )
+                self._latest = self._decode(payload)
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 raise RuntimeError(f"外部感知 UDP 数据无效: {exc}") from exc
             # Drain queued packets without waiting so the newest frame is used.
@@ -76,21 +92,16 @@ class UdpJsonAuxiliaryStateProvider:
             try:
                 while True:
                     payload, _ = self._socket.recvfrom(65535)
-                    message = json.loads(payload.decode("utf-8"))
-                    self._latest = AuxiliaryState(
-                        base_lin_vel=message["base_lin_vel"],
-                        height_scan=message["height_scan"],
-                        timestamp=time.monotonic(),
-                    )
+                    self._latest = self._decode(payload)
             except BlockingIOError:
                 pass
             finally:
                 self._socket.setblocking(True)
             break
         if self._latest is None:
-            raise TimeoutError("未收到外部速度/高度扫描数据")
+            raise TimeoutError("未收到外部辅助状态数据")
         if time.monotonic() - self._latest.timestamp > self.timeout_s:
-            raise TimeoutError("外部速度/高度扫描数据已超时")
+            raise TimeoutError("外部辅助状态数据已超时")
         return self._latest
 
     def close(self) -> None:

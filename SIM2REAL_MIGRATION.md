@@ -143,6 +143,12 @@ dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络
 
 方案 B：重新训练不包含 `height_scan` 的策略，只使用 IMU、关节状态和速度指令。若目前只有平地传感器，这是更适合的第一阶段路线。
 
+当前仓库已实现方案 B 的机器人端支持：Flat actor 使用 48 维观测，配置见
+`config/my_go1.yaml`，机载 `/ros2udp/odom` 可通过
+`scripts/ros_odom_auxiliary_bridge.py` 转成真实 `base_lin_vel` 辅助包。训练服务器重新
+得到 48 维 skrl checkpoint 后，使用 `scripts/export_flat_bundle.py` 导出；旧 235 维
+checkpoint 不能通过裁剪输入直接转换。
+
 绝对不能把 187 维全部填零后直接把 Rough 模型放到复杂地形上。那等于改变了策略输入分布。
 
 ### 3.3 状态估计和坐标系（转换可配置，符号仍需现场验证）

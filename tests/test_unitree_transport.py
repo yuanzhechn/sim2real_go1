@@ -91,6 +91,7 @@ def make_config():
     ]
     sdk_names = policy_names[3:6] + policy_names[0:3] + policy_names[9:12] + policy_names[6:9]
     return {
+        "observation": {"require_height_scan": True},
         "robot": {
             "joint_names": policy_names,
             "default_joint_pos": [0.0] * 12,

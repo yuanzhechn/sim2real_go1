@@ -117,6 +117,7 @@ class UnitreeSdkTransport:
     ) -> None:
         sdk_was_injected = sdk_module is not None
         robot = config["robot"]
+        self.observation_config = config["observation"]
         self.config = config["transport"]
         self.safety_config = config["safety"]
         self.policy_joint_names = list(robot["joint_names"])
@@ -215,6 +216,9 @@ class UnitreeSdkTransport:
                 bind_host=str(auxiliary.get("bind_host", "127.0.0.1")),
                 bind_port=int(auxiliary["bind_port"]),
                 timeout_s=float(auxiliary.get("timeout_s", 0.10)),
+                require_height_scan=bool(
+                    self.observation_config.get("require_height_scan", True)
+                ),
             )
         self._auxiliary_provider = auxiliary_provider
 

@@ -21,4 +21,5 @@ tests/test_action.py
 tests/test_bundle.py
 tests/test_core.py
 tests/test_remote.py
+tests/test_sensors.py
 tests/test_unitree_transport.py

@@ -89,3 +89,38 @@ scripts/run_hardware_with_remote.sh \
 ```
 
 `--steps 0` 表示持续运行。不要绕过包装脚本同时运行 `Legged_sport` 和低层策略。
+
+## 48 维 Flat 策略
+
+如果没有与训练 RayCaster 等价的真实高度扫描，应重新训练 Flat policy。Flat actor 的
+观测顺序为：
+
+```text
+base_lin_vel(3), base_ang_vel(3), projected_gravity(3), commands(3),
+joint_pos_rel(12), joint_vel(12), previous_actions(12) = 48
+```
+
+`config/my_go1.yaml` 已按该规格准备，`require_height_scan: false`。Flat 仍需要真实机身
+速度；本机已有 `/ros2udp/odom` 时，另开一个终端启动桥接：
+
+```bash
+source /opt/ros/melodic/setup.bash
+python2 scripts/ros_odom_auxiliary_bridge.py \
+  --odom-topic /ros2udp/odom --child-frame base_link --port 15001
+```
+
+现有 `artifacts/go1_sim2real_bundle` 是 235 维 Rough 模型，不能与 Flat 配置混用。
+训练服务器必须重新训练 48 维 actor，并在新 bundle manifest 中声明
+`observation_dim: 48`、`height_scan_dim: 0` 以及 Flat 配置路径；运行层会拒绝维度或
+terms 不一致的模型。
+
+重新训练得到 Flat `best_agent.pt` 后，在训练服务器的本仓库中导出：
+
+```bash
+python scripts/export_flat_bundle.py \
+  --checkpoint /path/to/flat/checkpoints/best_agent.pt \
+  --output artifacts/go1_flat_bundle
+```
+
+这不是把旧模型裁剪成 48 维；导出器要求 checkpoint 本身就是以 48 维 actor 重新训练
+得到的模型。最终把整个 `go1_flat_bundle` 复制到 Go1。

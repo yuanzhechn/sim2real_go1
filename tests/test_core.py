@@ -15,6 +15,18 @@ def test_observation_shape_and_order():
     np.testing.assert_allclose(obs[12:24], 0.0)
 
 
+def test_flat_observation_omits_height_scan():
+    pose = np.zeros(12, dtype=np.float32)
+    state = DryRunTransport(pose).read_state()
+    terms = [
+        "base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands",
+        "joint_pos", "joint_vel", "actions",
+    ]
+    obs = Go1ObservationBuilder(default_joint_pos=pose, terms=terms).build(state, [0.1, 0.0, 0.0])
+    assert obs.shape == (48,)
+    np.testing.assert_allclose(obs[9:12], [0.1, 0.0, 0.0])
+
+
 def test_safety_rejects_disabled_and_large_action():
     pose = np.array([0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 1.0, -1.5, -0.1, 1.0, -1.5])
     state = DryRunTransport(pose).read_state()

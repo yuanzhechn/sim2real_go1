@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .observation import Go1ObservationBuilder
+
 
 @dataclass
 class RuntimeConfig:
@@ -61,6 +63,12 @@ def _validate_config(config: RuntimeConfig) -> None:
     if float(config.robot.get("control_dt", 0.0)) <= 0:
         raise ValueError("robot.control_dt 必须大于 0")
     dimensions = config.observation.get("dimensions", ())
+    terms = config.observation.get("terms", ())
+    if len(terms) != len(dimensions):
+        raise ValueError("observation.terms 与 dimensions 项数必须一致")
+    expected_dimensions = [Go1ObservationBuilder.TERM_DIMENSIONS.get(name) for name in terms]
+    if None in expected_dimensions or [int(value) for value in dimensions] != expected_dimensions:
+        raise ValueError("observation.terms 与 dimensions 定义不一致")
     history_length = int(config.observation.get("history_length", 1))
     if history_length < 1:
         raise ValueError("observation.history_length 必须大于 0")
@@ -99,7 +107,9 @@ def validate_hardware_config(config: RuntimeConfig) -> None:
         raise ValueError("transport.joint_directions 只能为 -1 或 1")
     if transport.get("enable_switch_mode", "toggle") not in {"toggle", "hold", "program"}:
         raise ValueError("transport.enable_switch_mode 必须为 toggle、hold 或 program")
-    if bool(config.observation.get("require_height_scan", True)):
-        auxiliary = transport.get("auxiliary_state", {})
-        if auxiliary.get("mode") != "udp_json":
-            raise ValueError("Rough 策略要求真实 height_scan；必须配置 auxiliary_state.mode=udp_json")
+    auxiliary = transport.get("auxiliary_state", {})
+    if auxiliary.get("mode") != "udp_json":
+        reason = "base_lin_vel 和真实 height_scan" if bool(
+            config.observation.get("require_height_scan", True)
+        ) else "base_lin_vel"
+        raise ValueError(f"策略要求外部 {reason}；必须配置 auxiliary_state.mode=udp_json")

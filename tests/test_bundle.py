@@ -26,6 +26,7 @@ def _make_bundle(tmp_path: Path, policy_bytes: bytes = b"torchscript-placeholder
             "action_scale": 0.25,
         },
         "observation": {
+            "terms": ["base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands", "joint_pos", "joint_vel", "actions", "height_scan"],
             "dimensions": [3, 3, 3, 3, 12, 12, 12, 187],
             "height_scan_clip": 1.0,
             "history_length": 1,
@@ -41,6 +42,7 @@ def _make_bundle(tmp_path: Path, policy_bytes: bytes = b"torchscript-placeholder
         yaml.safe_dump(training), encoding="utf-8"
     )
     manifest = {
+        "config": "config/go1_rough_sim2real.yaml",
         "policy": "policy/policy.ts",
         "policy_sha256": hashlib.sha256(policy_bytes).hexdigest(),
         "observation_dim": 235,
@@ -82,3 +84,21 @@ def test_bundle_rejects_runtime_action_scale_mismatch(tmp_path: Path) -> None:
     runtime_path.write_text(yaml.safe_dump(runtime), encoding="utf-8")
     with pytest.raises(ValueError, match="robot.action_scale"):
         validate_bundle_runtime_config(bundle, load_config(runtime_path))
+
+
+def test_flat_bundle_declares_zero_height_scan_dimension(tmp_path: Path) -> None:
+    root = _make_bundle(tmp_path)
+    config_path = root / "config" / "go1_rough_sim2real.yaml"
+    training = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    training["observation"]["terms"] = training["observation"]["terms"][:-1]
+    training["observation"]["dimensions"] = training["observation"]["dimensions"][:-1]
+    training["observation"].pop("height_scan_clip")
+    training["policy"]["observation_dim"] = 48
+    config_path.write_text(yaml.safe_dump(training), encoding="utf-8")
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["observation_dim"] = 48
+    manifest["height_scan_dim"] = 0
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    bundle = load_bundle(root)
+    assert bundle.manifest["height_scan_dim"] == 0

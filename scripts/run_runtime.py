@@ -95,6 +95,7 @@ def main() -> None:
         history_length=int(config.observation.get("history_length", 1)),
         height_scan_clip=float(config.observation.get("height_scan_clip", 1.0)),
         default_joint_pos=default_pos,
+        terms=config.observation.get("terms"),
     )
     # 在打开真机 UDP 和建立低层状态通道前完成模型加载/签名检查。PyTorch 首次
     # 加载在 ARM64 上可能耗时数秒，不能让硬件在这段时间处于半初始化状态。
