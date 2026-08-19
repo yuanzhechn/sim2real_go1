@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 src/go1_sim2real/__init__.py
 src/go1_sim2real/action.py
+src/go1_sim2real/bundle.py
 src/go1_sim2real/config.py
 src/go1_sim2real/observation.py
 src/go1_sim2real/policy.py
@@ -16,5 +17,6 @@ src/go1_sim2real.egg-info/dependency_links.txt
 src/go1_sim2real.egg-info/requires.txt
 src/go1_sim2real.egg-info/top_level.txt
 tests/test_action.py
+tests/test_bundle.py
 tests/test_core.py
 tests/test_unitree_transport.py

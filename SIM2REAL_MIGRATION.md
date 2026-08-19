@@ -224,10 +224,14 @@ sha256sum /workspace/sim2real/artifacts/go1_rough_policy.ts
 ```bash
 cd /workspace/sim2real
 /workspace/IsaacLab/isaaclab.sh -p scripts/run_runtime.py \
-  --policy artifacts/go1_rough_policy.ts \
+  --bundle artifacts/go1_sim2real_bundle \
   --config config/go1_rough.yaml \
   --dry-run --steps 100
 ```
+
+部署 bundle 时优先传入 bundle 根目录。运行层会验证 manifest 中的策略 SHA256，
+并逐项比对训练/部署的观测维度、关节顺序、默认姿态、动作缩放、控制周期和网络结构；
+单独部署经过确认的 TorchScript 文件时仍可使用 `--policy`。
 
 启动时看到 `safety=action_delta_limited` 是动作渐变保护，动作会逐步增加，不代表模型加载失败。
 

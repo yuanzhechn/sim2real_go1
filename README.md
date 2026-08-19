@@ -25,10 +25,14 @@ conda activate go1-sim2real
 python -m pip install -e . --no-deps
 python -m pytest -q
 python scripts/run_runtime.py \
-  --policy artifacts/go1_rough_policy.ts \
+  --bundle artifacts/go1_sim2real_bundle \
   --config config/go1_rough.yaml \
   --dry-run --steps 100
 ```
+
+优先使用 `--bundle`：运行层会校验 manifest、策略 SHA256，以及训练和部署配置中的
+观测维度、关节顺序、默认姿态、动作缩放和控制周期。只有单独复制策略文件时才使用
+`--policy artifacts/go1_rough_policy.ts`。
 
 ## 真机接入
 
@@ -53,6 +57,8 @@ python3 scripts/read_robot_state.py \
 
 发送低层命令前必须按 Unitree 的安全流程停止本机 `Legged_sport`；运行层默认也会检查
 并拒绝两者并发。只读检查不要求停止该进程，但可能需要为本机 UDP 端口选择未占用值。
+低层 UDP 在新客户端首次发送前通常不会回传 LowState；显式真机模式会先发送零力矩、
+电机失能的被动初始化包建立状态通道，而只读模式始终保持零发送并可能因此超时。
 
 当前 Rough 策略必须接收真实的机身坐标系线速度与 187 点高度扫描。感知进程需向
 `transport.auxiliary_state.bind_port` 发送一帧一个 UDP JSON 包：

@@ -61,8 +61,13 @@ def _validate_config(config: RuntimeConfig) -> None:
     if float(config.robot.get("control_dt", 0.0)) <= 0:
         raise ValueError("robot.control_dt 必须大于 0")
     dimensions = config.observation.get("dimensions", ())
-    if sum(int(value) for value in dimensions) != int(config.policy.get("observation_dim", -1)):
-        raise ValueError("observation.dimensions 与 policy.observation_dim 不一致")
+    history_length = int(config.observation.get("history_length", 1))
+    if history_length < 1:
+        raise ValueError("observation.history_length 必须大于 0")
+    if sum(int(value) for value in dimensions) * history_length != int(
+        config.policy.get("observation_dim", -1)
+    ):
+        raise ValueError("observation.dimensions/history_length 与 policy.observation_dim 不一致")
     if int(config.policy.get("action_dim", 0)) != 12:
         raise ValueError("policy.action_dim 必须为 12")
 

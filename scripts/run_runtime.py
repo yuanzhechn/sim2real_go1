@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from go1_sim2real.config import load_config, validate_hardware_config
+from go1_sim2real.bundle import load_bundle, validate_bundle_runtime_config
 from go1_sim2real.observation import Go1ObservationBuilder
 from go1_sim2real.policy import TorchScriptPolicy
 from go1_sim2real.runtime import run_control_loop
@@ -24,7 +25,9 @@ from go1_sim2real.transport import DryRunTransport, JsonlTransport, UnitreeSdkTr
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy", required=True)
+    model_source = parser.add_mutually_exclusive_group(required=True)
+    model_source.add_argument("--policy", help="直接加载 TorchScript 策略")
+    model_source.add_argument("--bundle", help="加载并完整校验训练侧 sim2real bundle")
     parser.add_argument("--config", default=str(ROOT / "config/go1_rough.yaml"))
     parser.add_argument("--command", nargs=3, type=float, default=[0.2, 0.0, 0.0], metavar=("VX", "VY", "WZ"))
     parser.add_argument("--steps", type=int, default=100)
@@ -39,6 +42,19 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
+    policy_path = args.policy
+    if args.bundle:
+        try:
+            bundle = load_bundle(args.bundle)
+            validate_bundle_runtime_config(bundle, config)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"bundle 校验失败: {exc}") from exc
+        policy_path = str(bundle.policy_path)
+        print(
+            "bundle 校验通过: "
+            f"policy_sha256={bundle.manifest['policy_sha256']} "
+            f"obs={bundle.manifest['observation_dim']} action={bundle.manifest['action_dim']}"
+        )
     if args.state_jsonl and not args.dry_run:
         args.dry_run = True
     if not args.dry_run and config.transport.get("mode") != "unitree_sdk":
@@ -51,19 +67,29 @@ def main() -> None:
         except ValueError as exc:
             raise SystemExit(f"真机配置未通过安全校验: {exc}") from exc
 
+    policy = TorchScriptPolicy(policy_path)
     default_pos = np.asarray(config.robot["default_joint_pos"], dtype=np.float32)
+    builder = Go1ObservationBuilder(
+        history_length=int(config.observation.get("history_length", 1)),
+        height_scan_clip=float(config.observation.get("height_scan_clip", 1.0)),
+        default_joint_pos=default_pos,
+    )
+    # 在打开真机 UDP 和建立低层状态通道前完成模型加载/签名检查。PyTorch 首次
+    # 加载在 ARM64 上可能耗时数秒，不能让硬件在这段时间处于半初始化状态。
+    probe_action = np.asarray(
+        policy(np.zeros(builder.observation_dim, dtype=np.float32)), dtype=np.float32
+    ).reshape(-1)
+    if probe_action.size != int(config.policy["action_dim"]) or not np.all(np.isfinite(probe_action)):
+        raise SystemExit(
+            f"策略签名无效: 期望 {config.policy['action_dim']} 个有限动作，实际 {probe_action.size}"
+        )
+
     if args.state_jsonl:
         transport = JsonlTransport(args.state_jsonl)
     elif args.dry_run:
         transport = DryRunTransport(default_pos)
     else:
         transport = UnitreeSdkTransport(config=config.raw)
-    policy = TorchScriptPolicy(args.policy)
-    builder = Go1ObservationBuilder(
-        history_length=int(config.observation.get("history_length", 1)),
-        height_scan_clip=float(config.observation.get("height_scan_clip", 1.0)),
-        default_joint_pos=default_pos,
-    )
     safety = SafetySupervisor(config.safety, default_pos)
     # 真机的逐帧遥控器状态仍由 SafetySupervisor 检查；这里仅打开软件总门。
     safety.set_enabled(True)

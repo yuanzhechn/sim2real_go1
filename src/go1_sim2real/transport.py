@@ -152,6 +152,7 @@ class UnitreeSdkTransport:
         self._closed = False
         self._have_state = False
         self._allow_commands = bool(allow_commands)
+        self._bootstrap_sent = False
 
         if (
             self._allow_commands
@@ -281,9 +282,16 @@ class UnitreeSdkTransport:
     def read_state(self) -> RobotState:
         if self._closed:
             raise RuntimeError("transport 已关闭")
+        receive_deadline = time.monotonic() + float(self.config.get("state_timeout_s", 0.10))
         recv_result = self._udp.Recv()
-        if isinstance(recv_result, int) and recv_result < 0:
-            raise ConnectionError(f"Unitree UDP Recv 失败: {recv_result}")
+        while isinstance(recv_result, int) and recv_result < 0:
+            if self._allow_commands:
+                self._send_passive_bootstrap()
+            if time.monotonic() >= receive_deadline:
+                mode = "已发送被动初始化包" if self._allow_commands else "只读模式未发送初始化包"
+                raise ConnectionError(f"Unitree UDP Recv 超时 ({mode}): {recv_result}")
+            time.sleep(float(self.config.get("bootstrap_interval_s", 0.002)))
+            recv_result = self._udp.Recv()
         self._udp.GetRecv(self._state)
         now = time.monotonic()
         motor_states = list(self._state.motorState)[:12]
@@ -338,6 +346,29 @@ class UnitreeSdkTransport:
         )
         return result
 
+    def _send_passive_bootstrap(self) -> None:
+        """用零力矩、失能电机包建立 LowState 回传通道。
+
+        Unitree 低层 UDP 是请求/响应式接口，新本地端口在首次 Send 前不会收到
+        LowState。此操作只允许在显式命令模式且 sport mode 已被启动门阻止后发生。
+        """
+
+        if not self._allow_commands:
+            return
+        for index in range(12):
+            motor = self._cmd.motorCmd[index]
+            motor.mode = 0x00
+            motor.q = 2.146e9
+            motor.dq = 16000.0
+            motor.Kp = 0.0
+            motor.Kd = 0.0
+            motor.tau = 0.0
+        self._udp.SetSend(self._cmd)
+        send_result = self._udp.Send()
+        if isinstance(send_result, int) and send_result < 0:
+            raise ConnectionError(f"Unitree UDP 被动初始化发送失败: {send_result}")
+        self._bootstrap_sent = True
+
     def _apply_sdk_safety(self) -> None:
         if self._sdk_safety is None:
             return
@@ -384,9 +415,9 @@ class UnitreeSdkTransport:
         damping_kd = float(self.config.get("fault_damping_kd", 1.0))
         for index in range(12):
             motor = self._cmd.motorCmd[index]
-            motor.mode = 0x00
+            motor.mode = 0x0A
             motor.q = 2.146e9
-            motor.dq = 16000.0
+            motor.dq = 0.0
             motor.Kp = 0.0
             motor.Kd = damping_kd
             motor.tau = 0.0

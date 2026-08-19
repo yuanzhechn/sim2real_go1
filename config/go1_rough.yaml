@@ -58,6 +58,8 @@ transport:
   mode: dry_run
   interface: eth0
   state_timeout_s: 0.10
+  # LowState 请求/响应通道建立期间，被动零力矩初始化包的发送间隔。
+  bootstrap_interval_s: 0.002
   # 以下参数只有完成逐关节、IMU、PD、急停和吊挂验证后才允许启用。
   hardware_validated: false
   calibration_id: ""

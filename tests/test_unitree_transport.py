@@ -64,6 +64,15 @@ class FakeSdk:
     LowState = FakeLowState
 
 
+class BootstrapUdp(FakeUdp):
+    def Recv(self):
+        return 0 if self.send_count else -1
+
+
+class BootstrapSdk(FakeSdk):
+    UDP = BootstrapUdp
+
+
 class FakeAuxiliary:
     def read(self):
         return AuxiliaryState(np.array([0.4, 0.0, 0.0]), np.arange(187) / 100, time.monotonic())
@@ -130,3 +139,12 @@ def test_read_only_transport_never_sends_even_on_close():
     transport.read_state()
     transport.close()
     assert transport._udp.send_count == 0
+
+
+def test_command_transport_bootstraps_low_state_with_passive_packet():
+    transport = UnitreeSdkTransport(make_config(), BootstrapSdk, FakeAuxiliary())
+    transport.read_state()
+    assert transport._udp.send_count == 1
+    assert all(m.mode == 0x00 for m in transport._cmd.motorCmd[:12])
+    assert all(m.Kp == 0.0 and m.Kd == 0.0 and m.tau == 0.0 for m in transport._cmd.motorCmd[:12])
+    transport.close()
