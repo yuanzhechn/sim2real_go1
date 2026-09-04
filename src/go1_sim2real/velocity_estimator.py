@@ -22,6 +22,7 @@ class Go1ContactVelocityEstimator:
         filter_alpha: float = 0.2,
         max_speed: float = 3.0,
         max_no_contact_frames: int = 5,
+        allow_force_fallback: bool = False,
     ) -> None:
         if contact_threshold < 0:
             raise ValueError("contact_threshold 不能为负数")
@@ -36,6 +37,7 @@ class Go1ContactVelocityEstimator:
         self.filter_alpha = float(filter_alpha)
         self.max_speed = float(max_speed)
         self.max_no_contact_frames = int(max_no_contact_frames)
+        self.allow_force_fallback = bool(allow_force_fallback)
         self.velocity = np.zeros(3, dtype=np.float32)
         self.contact_count = 0
         self.valid = False
@@ -73,6 +75,19 @@ class Go1ContactVelocityEstimator:
         ).astype(np.float32)
         return foot, jacobian
 
+    @staticmethod
+    def policy_to_leg_matrix(values: object) -> np.ndarray:
+        """Convert group-major policy joints to four [hip, thigh, calf] rows."""
+        flat = np.asarray(values, dtype=np.float32).reshape(12)
+        return np.column_stack((flat[:4], flat[4:8], flat[8:]))
+
+    @classmethod
+    def estimate_base_height(cls, joint_pos: object, foot_radius: float = 0.02) -> float:
+        """Estimate flat-ground trunk height from the median foot vertical position."""
+        q = cls.policy_to_leg_matrix(joint_pos)
+        foot_z = [cls.foot_position_and_jacobian(leg, q[leg])[0][2] for leg in range(4)]
+        return float(-np.median(foot_z) + float(foot_radius))
+
     def update(
         self,
         joint_pos: object,
@@ -80,8 +95,10 @@ class Go1ContactVelocityEstimator:
         base_ang_vel: object,
         foot_force_est: object,
     ) -> np.ndarray:
-        q = np.asarray(joint_pos, dtype=np.float32).reshape(4, 3)
-        dq = np.asarray(joint_vel, dtype=np.float32).reshape(4, 3)
+        # Isaac Lab Go1 policy order is group-major: four hips, four thighs,
+        # four calves. Convert it to one [hip, thigh, calf] row per leg.
+        q = self.policy_to_leg_matrix(joint_pos)
+        dq = self.policy_to_leg_matrix(joint_vel)
         omega = np.asarray(base_ang_vel, dtype=np.float32).reshape(3)
         forces = np.asarray(foot_force_est, dtype=np.float32).reshape(4)
         if not all(np.all(np.isfinite(value)) for value in (q, dq, omega, forces)):
@@ -90,13 +107,19 @@ class Go1ContactVelocityEstimator:
         contacts = forces >= self.contact_threshold
         self.contact_count = int(np.sum(contacts))
         candidates = []
-        for leg in np.flatnonzero(contacts):
+        all_candidates = []
+        for leg in range(4):
             foot, jacobian = self.foot_position_and_jacobian(int(leg), q[leg])
             foot_velocity = jacobian @ dq[leg]
-            candidates.append(-(np.cross(omega, foot) + foot_velocity))
+            candidate = -(np.cross(omega, foot) + foot_velocity)
+            all_candidates.append(candidate)
+            if contacts[leg]:
+                candidates.append(candidate)
 
-        if self.contact_count >= self.min_contacts:
-            measured = np.median(np.asarray(candidates, dtype=np.float32), axis=0)
+        enough_force_contacts = self.contact_count >= self.min_contacts
+        if enough_force_contacts or self.allow_force_fallback:
+            selected = candidates if enough_force_contacts else all_candidates
+            measured = np.median(np.asarray(selected, dtype=np.float32), axis=0)
             norm = float(np.linalg.norm(measured))
             if norm > self.max_speed:
                 measured *= self.max_speed / norm

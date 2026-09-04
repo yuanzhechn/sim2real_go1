@@ -136,6 +136,23 @@ def test_unitree_action_reorders_targets_and_gains():
     transport.close()
 
 
+def test_kinematic_flat_scan_mode_provides_nominal_rough_observation():
+    config = make_config()
+    config["transport"]["auxiliary_state"] = {
+        "mode": "kinematic_contact_flat_scan",
+        "flat_height_scan_from_kinematics": True,
+        "foot_radius": 0.02,
+        "height_scan_offset": 0.5,
+    }
+    transport = UnitreeSdkTransport(config, FakeSdk, auxiliary_provider=None)
+
+    state = transport.read_state()
+
+    assert np.all(state.height_scan == state.height_scan[0])
+    assert -1.0 <= state.height_scan[0] <= 1.0
+    transport.close()
+
+
 def test_isaac_resolved_order_maps_default_pose_to_unitree_sdk_order():
     config = make_config()
     config["robot"]["joint_names"] = [

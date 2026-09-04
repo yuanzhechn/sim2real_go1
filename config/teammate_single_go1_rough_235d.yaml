@@ -108,7 +108,16 @@ transport:
   fault_damping_kd: 1.0
   shutdown_damping_packets: 5
   auxiliary_state:
-    mode: udp_json
-    bind_host: 127.0.0.1
-    bind_port: 15001
-    timeout_s: 0.10
+    # 停止 Legged_sport 会同时停止机载 ROS；平地试运行不依赖 ROS 数据流。
+    # 平地 187 点值按足端几何估计的实时 trunk height - 训练 offset(0.5)生成。
+    mode: kinematic_contact_flat_scan
+    flat_height_scan_from_kinematics: true
+    foot_radius: 0.02
+    height_scan_offset: 0.5
+    contact_threshold: 5.0
+    min_contacts: 2
+    filter_alpha: 0.2
+    max_speed: 3.0
+    max_no_contact_frames: 5
+    # 当前 LowState.footForceEst 恒为零；以四腿候选速度中值作为显式回退。
+    allow_force_fallback: true

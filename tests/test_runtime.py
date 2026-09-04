@@ -9,11 +9,12 @@ from go1_sim2real.types import RobotState
 
 
 class FaultTransport:
-    def __init__(self):
+    def __init__(self, enabled=False):
         self.safe_reasons = []
         self.sent = []
         self.finished = False
         self.closed = False
+        self.enabled = enabled
 
     def read_state(self):
         return RobotState(
@@ -25,7 +26,7 @@ class FaultTransport:
             last_action=np.zeros(12),
             height_scan=np.zeros(187),
             timestamp=time.monotonic(),
-            enable_switch=False,
+            enable_switch=self.enabled,
         )
 
     def send_action(self, action):
@@ -67,5 +68,32 @@ def test_safety_fault_stops_immediately_and_skips_finish_transition():
 
     assert calls == [(0, "enable_switch_off")]
     assert transport.safe_reasons == ["enable_switch_off"]
+    assert not transport.finished
+    assert transport.closed
+
+
+def test_normal_exit_can_skip_position_transition():
+    transport = FaultTransport(enabled=True)
+    builder = Go1ObservationBuilder(
+        default_joint_pos=np.zeros(12),
+        terms=[
+            "base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands",
+            "joint_pos", "joint_vel", "actions",
+        ],
+    )
+    safety = SafetySupervisor({"require_enable_switch": True}, np.zeros(12))
+    safety.set_enabled(True)
+
+    run_control_loop(
+        transport=transport,
+        policy=lambda _observation: np.zeros(12),
+        observation_builder=builder,
+        safety=safety,
+        command=np.zeros(3),
+        control_dt=0.001,
+        steps=1,
+        finish_transition_on_normal_exit=False,
+    )
+
     assert not transport.finished
     assert transport.closed

@@ -24,6 +24,7 @@ def run_control_loop(
     action_clip: float = 1.0,
     on_step: Callable[[int, str, np.ndarray, RobotState, np.ndarray], None] | None = None,
     command_provider: Callable[[RobotState], object] | None = None,
+    finish_transition_on_normal_exit: bool = True,
 ) -> None:
     if control_dt <= 0:
         raise ValueError("control_dt 必须大于 0")
@@ -80,7 +81,7 @@ def run_control_loop(
             time.sleep(max(0.0, next_tick - time.monotonic()))
         completed_normally = not stopped_by_safety
     finally:
-        if completed_normally:
+        if completed_normally and finish_transition_on_normal_exit:
             finish = getattr(transport, "finish_policy", None)
             if finish is not None:
                 finish()

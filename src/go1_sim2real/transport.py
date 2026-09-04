@@ -164,6 +164,10 @@ class UnitreeSdkTransport:
         self._emergency_stop_latched = False
         self._previous_enable_pressed: bool | None = None
         self._velocity_estimator: Go1ContactVelocityEstimator | None = None
+        self._kinematic_height_scan = np.zeros(187, dtype=np.float32)
+        self._kinematic_scan_from_feet = False
+        self._foot_radius = 0.02
+        self._height_scan_offset = 0.5
 
         if (
             self._allow_commands
@@ -217,14 +221,31 @@ class UnitreeSdkTransport:
         if auxiliary_provider is None and require_auxiliary:
             auxiliary = self.config.get("auxiliary_state", {})
             auxiliary_mode = auxiliary.get("mode")
-            if auxiliary_mode == "kinematic_contact":
+            if auxiliary_mode in {
+                "kinematic_contact", "kinematic_contact_flat_scan"
+            }:
                 self._velocity_estimator = Go1ContactVelocityEstimator(
                     contact_threshold=float(auxiliary.get("contact_threshold", 5.0)),
                     min_contacts=int(auxiliary.get("min_contacts", 2)),
                     filter_alpha=float(auxiliary.get("filter_alpha", 0.2)),
                     max_speed=float(auxiliary.get("max_speed", 3.0)),
                     max_no_contact_frames=int(auxiliary.get("max_no_contact_frames", 5)),
+                    allow_force_fallback=bool(
+                        auxiliary.get("allow_force_fallback", False)
+                    ),
                 )
+                if auxiliary_mode == "kinematic_contact_flat_scan":
+                    self._kinematic_scan_from_feet = bool(
+                        auxiliary.get("flat_height_scan_from_kinematics", False)
+                    )
+                    self._foot_radius = float(auxiliary.get("foot_radius", 0.02))
+                    self._height_scan_offset = float(
+                        auxiliary.get("height_scan_offset", 0.5)
+                    )
+                    if not self._kinematic_scan_from_feet:
+                        self._kinematic_height_scan.fill(
+                            float(auxiliary["flat_height_scan_value"])
+                        )
             elif auxiliary_mode != "udp_json":
                 raise ValueError(
                     "策略必须提供 auxiliary_state.mode=udp_json 或 kinematic_contact"
@@ -406,11 +427,21 @@ class UnitreeSdkTransport:
             base_lin_vel = self._velocity_estimator.update(
                 positions, velocities, angular_velocity, foot_forces_estimated
             )
+            if self._kinematic_scan_from_feet:
+                scan_value = (
+                    self._velocity_estimator.estimate_base_height(
+                        positions, foot_radius=self._foot_radius
+                    )
+                    - self._height_scan_offset
+                )
+                self._kinematic_height_scan.fill(np.clip(scan_value, -1.0, 1.0))
             base_lin_vel_valid = self._velocity_estimator.valid
             contact_count = self._velocity_estimator.contact_count
             from .sensors import AuxiliaryState
 
-            auxiliary = AuxiliaryState(base_lin_vel, np.zeros(187), now)
+            auxiliary = AuxiliaryState(
+                base_lin_vel, self._kinematic_height_scan, now
+            )
         elif self._auxiliary_provider is None:
             from .sensors import AuxiliaryState
 

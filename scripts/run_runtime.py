@@ -118,8 +118,8 @@ def main() -> None:
             raise SystemExit("地面试走必须添加 --manage-sport-mode")
         if args.command_source != "fixed":
             raise SystemExit("首次地面试走只允许 --command-source fixed")
-        if args.steps <= 0 or args.steps > 150:
-            raise SystemExit("地面试走要求 1<=--steps<=150")
+        if args.steps <= 0 or args.steps > 500:
+            raise SystemExit("地面试走要求 1<=--steps<=500")
         if not (0.0 <= command[0] <= 0.15) or np.max(np.abs(command[1:])) > 0:
             raise SystemExit("地面试走只允许 vx 在 [0,0.15]，vy=wz=0")
     if args.ground_remote_control:
@@ -169,7 +169,6 @@ def main() -> None:
             30.0 if name.startswith(("RL_", "RR_")) else 20.0
             for name in config.robot["joint_names"]
         ]
-        config.transport["kp"] = ground_kp
         config.transport["startup_kp"] = ground_kp
         config.transport["startup_kp_limit"] = 30.0
         config.transport["startup_transition_s"] = 10.0
@@ -221,7 +220,7 @@ def main() -> None:
         raise SystemExit(
             f"--action-limit 不能超过训练动作裁剪值 {configured_action_clip}"
         )
-    ground_action_limit = 1.5 if args.ground_remote_control else 0.5
+    ground_action_limit = 1.5 if args.ground_remote_control else 1.0
     if ground_policy_mode and action_clip > ground_action_limit:
         raise SystemExit(
             f"当前地面运动模式的动作上限不得超过 {ground_action_limit}"
@@ -277,6 +276,7 @@ def main() -> None:
                 "enable_switch": state.enable_switch,
                 "emergency_stop": state.emergency_stop,
                 "foot_forces_estimated": None if state.foot_forces_estimated is None else state.foot_forces_estimated.tolist(),
+                "foot_forces": None if state.foot_forces is None else state.foot_forces.tolist(),
                 "contact_count": state.contact_count,
                 "base_lin_vel_valid": state.base_lin_vel_valid,
             }
@@ -319,6 +319,9 @@ def main() -> None:
             action_clip=action_clip,
             on_step=report,
             command_provider=command_provider,
+            # 地面承重状态下强拉回默认关节角会造成倾倒和位置环震动；
+            # close() 先发阻尼包，随后 finally 恢复原厂 Sport。
+            finish_transition_on_normal_exit=not ground_policy_mode,
         )
     finally:
         if log_stream is not None:

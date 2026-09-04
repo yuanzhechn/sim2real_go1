@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .observation import Go1ObservationBuilder
 
 
@@ -108,14 +110,30 @@ def validate_hardware_config(config: RuntimeConfig) -> None:
     if transport.get("enable_switch_mode", "toggle") not in {"toggle", "hold", "program"}:
         raise ValueError("transport.enable_switch_mode 必须为 toggle、hold 或 program")
     auxiliary = transport.get("auxiliary_state", {})
-    if auxiliary.get("mode") not in {"udp_json", "kinematic_contact"}:
+    auxiliary_mode = auxiliary.get("mode")
+    if auxiliary_mode not in {
+        "udp_json", "kinematic_contact", "kinematic_contact_flat_scan"
+    }:
         reason = "base_lin_vel 和真实 height_scan" if bool(
             config.observation.get("require_height_scan", True)
         ) else "base_lin_vel"
         raise ValueError(
-            f"策略要求 {reason}；必须配置 auxiliary_state.mode=udp_json 或 kinematic_contact"
+            f"策略要求 {reason}；auxiliary_state.mode 配置无效"
         )
-    if auxiliary.get("mode") == "kinematic_contact" and bool(
+    requires_height_scan = bool(
         config.observation.get("require_height_scan", True)
-    ):
+    )
+    if auxiliary_mode == "kinematic_contact" and requires_height_scan:
         raise ValueError("kinematic_contact 不能提供 height_scan")
+    if auxiliary_mode == "kinematic_contact_flat_scan":
+        if not requires_height_scan:
+            raise ValueError("kinematic_contact_flat_scan 只用于需要 height_scan 的策略")
+        if bool(auxiliary.get("flat_height_scan_from_kinematics", False)):
+            foot_radius = float(auxiliary.get("foot_radius", 0.02))
+            height_offset = float(auxiliary.get("height_scan_offset", 0.5))
+            if not 0.0 <= foot_radius <= 0.1 or not 0.0 < height_offset <= 1.0:
+                raise ValueError("foot_radius/height_scan_offset 超出有效范围")
+        else:
+            flat_value = float(auxiliary.get("flat_height_scan_value", float("nan")))
+            if not np.isfinite(flat_value) or not -1.0 <= flat_value <= 1.0:
+                raise ValueError("flat_height_scan_value 必须是 [-1,1] 内的有限值")
