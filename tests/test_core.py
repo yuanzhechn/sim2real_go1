@@ -45,3 +45,21 @@ def test_safety_slews_enabled_action():
     assert result.allowed
     assert result.reason == "action_delta_limited"
     np.testing.assert_allclose(action, 0.25)
+
+
+def test_safety_uses_runtime_action_limit_above_one():
+    pose = np.zeros(12, dtype=np.float32)
+    state = DryRunTransport(pose).read_state()
+    safety = SafetySupervisor(
+        {
+            "require_enable_switch": False,
+            "max_action_delta": 10.0,
+            "runtime_action_limit": 1.5,
+        },
+        pose,
+    )
+
+    action, result = safety.filter_action(state, np.full(12, 2.0))
+
+    assert result.allowed
+    np.testing.assert_allclose(action, 1.5)

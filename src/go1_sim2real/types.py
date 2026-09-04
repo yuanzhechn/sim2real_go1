@@ -37,6 +37,10 @@ class RobotState:
     emergency_stop: bool = False
     communication_ok: bool = True
     remote_axes: np.ndarray | None = None
+    foot_forces: np.ndarray | None = None
+    foot_forces_estimated: np.ndarray | None = None
+    contact_count: int | None = None
+    base_lin_vel_valid: bool = True
 
     def __post_init__(self) -> None:
         self.base_lin_vel = vector(self.base_lin_vel, 3, "base_lin_vel")
@@ -52,6 +56,12 @@ class RobotState:
             self.motor_modes = vector(self.motor_modes, 12, "motor_modes")
         if self.remote_axes is not None:
             self.remote_axes = vector(self.remote_axes, 4, "remote_axes")
+        if self.foot_forces is not None:
+            self.foot_forces = vector(self.foot_forces, 4, "foot_forces")
+        if self.foot_forces_estimated is not None:
+            self.foot_forces_estimated = vector(
+                self.foot_forces_estimated, 4, "foot_forces_estimated"
+            )
         scalar_values = (
             self.base_lin_vel,
             self.base_ang_vel,

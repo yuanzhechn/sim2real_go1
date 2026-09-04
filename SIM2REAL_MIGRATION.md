@@ -20,7 +20,8 @@ Unitree Go1
 
 机器人上不需要安装 Isaac Sim 或 Isaac Lab。服务器负责训练，机器人侧只运行推理和控制循环。
 
-当前策略是 Isaac Lab Manager-Based Rough 单智能体 PPO 策略。它不是 Walk These Ways 的模型，也不能直接使用 Walk These Ways 的部署脚本。
+当前仓库同时管理 Isaac Lab Manager-Based Rough 的 skrl 与 RSL-RL 单智能体 PPO 导出。
+两者训练 checkpoint 格式不同，但部署均使用经过签名校验的 TorchScript policy。
 
 ## 2. 已经完成的内容
 
@@ -80,13 +81,12 @@ joint_pos_rel = joint_pos_absolute - default_joint_pos
 joint_target = default_joint_pos + 0.25 * action
 ```
 
-`Go1JointPositionMapper` 已经实现这一转换。当前 12 个关节顺序为：
+`Go1JointPositionMapper` 已经实现这一转换。Isaac Lab 5.1 运行时解析出的 12 个关节顺序为：
 
 ```text
-FL_hip, FL_thigh, FL_calf,
-FR_hip, FR_thigh, FR_calf,
-RL_hip, RL_thigh, RL_calf,
-RR_hip, RR_thigh, RR_calf
+FL_hip, FR_hip, RL_hip, RR_hip,
+FL_thigh, FR_thigh, RL_thigh, RR_thigh,
+FL_calf, FR_calf, RL_calf, RR_calf
 ```
 
 这个顺序必须同时和 USD、Isaac Lab 配置、Unitree SDK 适配器一致。不能仅凭名称猜测 SDK 顺序，必须在真机上逐关节验证。
@@ -140,6 +140,12 @@ dry-run 和 JSONL 回放 transport 只在本地运行，不会发送任何网络
 可选方案：
 
 方案 A：接入激光雷达、深度相机或其他传感器，将数据投影为训练时相同的 187 个采样点。必须匹配坐标系、采样顺序、单位、裁剪范围、更新频率和延迟。
+
+机载相机的平地调试桥见 `scripts/ros_rough_auxiliary_bridge.py`。它按照 Isaac Lab 默认
+`GridPatternCfg(size=[1.6, 1.0], resolution=0.1, ordering="xy")` 生成 17×11 点，并采用
+`base_height - ground_height - 0.5` 的观测定义。因为当前相机不能直接覆盖整个网格，
+该桥只在点云能通过覆盖率、平面残差、坡度和新鲜度门槛时拟合/外推平面，**仅用于平地
+commissioning**；它会抹掉台阶等非平面地形，不能作为最终 Rough 感知方案。
 
 方案 B：重新训练不包含 `height_scan` 的策略，只使用 IMU、关节状态和速度指令。若目前只有平地传感器，这是更适合的第一阶段路线。
 
@@ -231,7 +237,7 @@ sha256sum /workspace/sim2real/artifacts/go1_rough_policy.ts
 ```bash
 cd /workspace/sim2real
 /workspace/IsaacLab/isaaclab.sh -p scripts/run_runtime.py \
-  --bundle artifacts/go1_sim2real_bundle \
+  --bundle artifacts/yuanzhe/rough_235d_skrl_20260815 \
   --config config/go1_rough.yaml \
   --dry-run --steps 100
 ```

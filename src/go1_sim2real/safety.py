@@ -41,6 +41,8 @@ class SafetySupervisor:
             return SafetyResult(False, "emergency_stop")
         if not state.communication_ok:
             return SafetyResult(False, "communication_error")
+        if bool(self.config.get("require_base_lin_vel_valid", False)) and not state.base_lin_vel_valid:
+            return SafetyResult(False, "base_lin_vel_invalid")
         if not self._enabled:
             return SafetyResult(False, "enable_switch_off")
         if state.enable_switch is False:
@@ -84,7 +86,10 @@ class SafetySupervisor:
         action_array = np.asarray(action, dtype=np.float32).reshape(-1)
         result = self.validate(state, action_array)
         if result.allowed:
-            clipped = np.clip(action_array, -1.0, 1.0)
+            action_limit = float(self.config.get("runtime_action_limit", 1.0))
+            if not np.isfinite(action_limit) or action_limit <= 0.0:
+                raise ValueError("safety.runtime_action_limit 必须是有限正数")
+            clipped = np.clip(action_array, -action_limit, action_limit)
             max_delta = float(self.config.get("max_action_delta", 0.25))
             limited = np.clip(clipped, self._last_action - max_delta, self._last_action + max_delta)
             self._last_action = limited.copy()

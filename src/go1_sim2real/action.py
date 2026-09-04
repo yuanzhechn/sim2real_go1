@@ -6,7 +6,11 @@ import numpy as np
 
 
 class Go1JointPositionMapper:
-    """将策略的归一化动作转换为 12 个关节目标角度。"""
+    """将策略的归一化动作转换为 12 个关节目标角度。
+
+    当前 Isaac Lab Go1 articulation 的解析顺序是四个 hip、四个 thigh、
+    四个 calf，因此 hip 通道是 0..3，而不是按腿排列时的 0/3/6/9。
+    """
 
     def __init__(self, default_joint_pos: object, action_scale: float = 0.25, hip_scale_reduction: float = 1.0):
         self.default_joint_pos = np.asarray(default_joint_pos, dtype=np.float32).reshape(12)
@@ -18,5 +22,5 @@ class Go1JointPositionMapper:
     def to_joint_target(self, action: object) -> np.ndarray:
         normalized = np.asarray(action, dtype=np.float32).reshape(12)
         delta = normalized * self.action_scale
-        delta[[0, 3, 6, 9]] *= self.hip_scale_reduction
+        delta[:4] *= self.hip_scale_reduction
         return self.default_joint_pos + delta

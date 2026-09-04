@@ -3,6 +3,7 @@ import struct
 import time
 
 import numpy as np
+import pytest
 
 from go1_sim2real.sensors import AuxiliaryState
 from go1_sim2real.transport import UnitreeSdkTransport
@@ -135,6 +136,69 @@ def test_unitree_action_reorders_targets_and_gains():
     transport.close()
 
 
+def test_isaac_resolved_order_maps_default_pose_to_unitree_sdk_order():
+    config = make_config()
+    config["robot"]["joint_names"] = [
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
+        "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
+        "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+    ]
+    default = np.asarray(
+        [0.1, -0.1, 0.1, -0.1, 0.8, 0.8, 1.0, 1.0, -1.5, -1.5, -1.5, -1.5],
+        dtype=np.float32,
+    )
+    config["robot"]["default_joint_pos"] = default.tolist()
+    config["transport"]["joint_directions"] = [1.0] * 12
+    config["transport"]["kp"] = [20.0] * 12
+    transport = UnitreeSdkTransport(config, FakeSdk, FakeAuxiliary())
+
+    sdk_default = transport._policy_to_sdk_values(default)
+
+    np.testing.assert_allclose(
+        sdk_default,
+        [-0.1, 0.8, -1.5, 0.1, 0.8, -1.5, -0.1, 1.0, -1.5, 0.1, 1.0, -1.5],
+    )
+    transport.close()
+
+
+def test_prepare_for_policy_smoothly_reaches_default(monkeypatch):
+    config = make_config()
+    config["robot"]["default_joint_pos"] = [0.5] * 12
+    config["transport"].update(
+        {
+            "enable_switch_mode": "program",
+            "remote_startup_center_frames": 1,
+            "remote_control": {"deadband": 0.08},
+            "startup_transition_s": 3.0,
+            "startup_control_dt": 1.0,
+            "startup_kp": 5.0,
+            "startup_kd": 1.0,
+        }
+    )
+    transport = UnitreeSdkTransport(config, FakeSdk, FakeAuxiliary())
+    monkeypatch.setattr("go1_sim2real.transport.time.sleep", lambda _seconds: None)
+    transport.prepare_for_policy()
+    sdk_targets = np.asarray([m.q for m in transport._cmd.motorCmd[:12]])
+    np.testing.assert_allclose(sdk_targets, 0.5)
+    assert all(m.Kp == 5.0 and m.Kd == 1.0 for m in transport._cmd.motorCmd[:12])
+    transport.close()
+
+
+def test_finish_policy_uses_configured_shutdown_transition(monkeypatch):
+    config = make_config()
+    config["transport"]["shutdown_transition_s"] = 4.0
+    transport = UnitreeSdkTransport(config, FakeSdk, FakeAuxiliary())
+    calls = []
+    monkeypatch.setattr(
+        transport,
+        "prepare_for_policy",
+        lambda duration=None, label="": calls.append((duration, label)),
+    )
+    transport.finish_policy()
+    assert calls == [(4.0, "策略退出过渡")]
+    transport.close()
+
+
 def test_read_only_transport_never_sends_even_on_close():
     transport = UnitreeSdkTransport(
         make_config(), FakeSdk, FakeAuxiliary(), allow_commands=False
@@ -151,6 +215,21 @@ def test_command_transport_bootstraps_low_state_with_passive_packet():
     assert all(m.mode == 0x00 for m in transport._cmd.motorCmd[:12])
     assert all(m.Kp == 0.0 and m.Kd == 0.0 and m.tau == 0.0 for m in transport._cmd.motorCmd[:12])
     transport.close()
+
+
+def test_passive_only_transport_rejects_policy_action_and_closes_disabled():
+    sdk = FakeSdk()
+    transport = UnitreeSdkTransport(
+        make_config(), sdk_module=sdk, auxiliary_provider=FakeAuxiliary(),
+        allow_commands=True, passive_only=True,
+    )
+    transport.read_state()
+    with pytest.raises(PermissionError, match="被动初始化包"):
+        transport.send_action(np.zeros(12))
+    transport.close()
+    assert transport._udp.send_count >= 1
+    assert all(m.mode == 0 for m in transport._cmd.motorCmd[:12])
+    assert all(m.Kp == 0 and m.Kd == 0 and m.tau == 0 for m in transport._cmd.motorCmd[:12])
 
 
 def test_remote_l2_toggles_enable_and_b_latches_emergency_stop():

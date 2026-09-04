@@ -40,7 +40,13 @@ def run_control_loop(
         raise ValueError("策略预热输出必须是有限的 12 维向量")
     step = 0
     next_tick = time.monotonic()
+    completed_normally = False
+    stopped_by_safety = False
     try:
+        prepare = getattr(transport, "prepare_for_policy", None)
+        if prepare is not None:
+            prepare()
+            next_tick = time.monotonic()
         while steps is None or step < steps:
             state = transport.read_state()
             current_command = (
@@ -67,7 +73,15 @@ def run_control_loop(
             if on_step is not None:
                 on_step(step, result.reason, filtered_action, state, current_command)
             step += 1
+            if not result.allowed:
+                stopped_by_safety = True
+                break
             next_tick += control_dt
             time.sleep(max(0.0, next_tick - time.monotonic()))
+        completed_normally = not stopped_by_safety
     finally:
+        if completed_normally:
+            finish = getattr(transport, "finish_policy", None)
+            if finish is not None:
+                finish()
         transport.close()

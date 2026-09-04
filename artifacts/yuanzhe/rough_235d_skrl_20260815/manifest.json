@@ -1,0 +1,17 @@
+{
+  "created_at_utc": "2026-08-19T12:54:45.172183+00:00",
+  "checkpoint": "/workspace/Multi_UnitreeGo1/logs/skrl/unitree_go1_rough/2026-08-15_16-02-13_ppo_torch_go1_rough_1/checkpoints/best_agent.pt",
+  "checkpoint_sha256": "a948c602c3874f6f1d45762b0b8922121d0740824b9b19b1d3907da72b1ed1e7",
+  "policy": "policy/go1_rough_policy.ts",
+  "policy_sha256": "824a95b9cb4a929783161c70507cb78f6c3260602b7ce877cccc30af00d32066",
+  "observation_dim": 235,
+  "action_dim": 12,
+  "hidden_layers": [
+    512,
+    256,
+    128
+  ],
+  "action_scale": 0.25,
+  "height_scan_dim": 187,
+  "transport_default": "dry_run"
+}

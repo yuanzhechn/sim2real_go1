@@ -86,13 +86,23 @@ def _validate_internal_spec(manifest: dict[str, Any], config: dict[str, Any]) ->
         policy = config["policy"]
         dimensions = [int(value) for value in observation["dimensions"]]
         terms = observation.get("terms")
-        if terms is None and dimensions == [3, 3, 3, 3, 12, 12, 12, 187]:
-            # 兼容第一版 Rough bundle；新 bundle 必须显式导出 terms。
-            terms = [
-                "base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands",
-                "joint_pos", "joint_vel", "actions", "height_scan",
-            ]
-            observation["terms"] = terms
+        if terms is None:
+            # 兼容训练服务器早期导出的 bundle。两种维度只对应仓库内已经固定的
+            # observation builder 顺序；其他形状仍拒绝推断，避免静默错位。
+            legacy_terms = {
+                (3, 3, 3, 3, 12, 12, 12): [
+                    "base_lin_vel", "base_ang_vel", "projected_gravity",
+                    "velocity_commands", "joint_pos", "joint_vel", "actions",
+                ],
+                (3, 3, 3, 3, 12, 12, 12, 187): [
+                    "base_lin_vel", "base_ang_vel", "projected_gravity",
+                    "velocity_commands", "joint_pos", "joint_vel", "actions",
+                    "height_scan",
+                ],
+            }
+            terms = legacy_terms.get(tuple(dimensions))
+            if terms is not None:
+                observation["terms"] = terms
         terms = list(terms)
         history_length = int(observation.get("history_length", 1))
     except (KeyError, TypeError, ValueError) as exc:

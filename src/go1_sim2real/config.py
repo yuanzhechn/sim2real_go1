@@ -108,8 +108,14 @@ def validate_hardware_config(config: RuntimeConfig) -> None:
     if transport.get("enable_switch_mode", "toggle") not in {"toggle", "hold", "program"}:
         raise ValueError("transport.enable_switch_mode 必须为 toggle、hold 或 program")
     auxiliary = transport.get("auxiliary_state", {})
-    if auxiliary.get("mode") != "udp_json":
+    if auxiliary.get("mode") not in {"udp_json", "kinematic_contact"}:
         reason = "base_lin_vel 和真实 height_scan" if bool(
             config.observation.get("require_height_scan", True)
         ) else "base_lin_vel"
-        raise ValueError(f"策略要求外部 {reason}；必须配置 auxiliary_state.mode=udp_json")
+        raise ValueError(
+            f"策略要求 {reason}；必须配置 auxiliary_state.mode=udp_json 或 kinematic_contact"
+        )
+    if auxiliary.get("mode") == "kinematic_contact" and bool(
+        config.observation.get("require_height_scan", True)
+    ):
+        raise ValueError("kinematic_contact 不能提供 height_scan")

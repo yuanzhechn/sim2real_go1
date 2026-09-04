@@ -1,0 +1,20 @@
+{
+  "created_at_utc": "2026-09-04T00:18:02Z",
+  "owner": "teammate",
+  "framework": "rsl_rl",
+  "task": "Isaac-Go1-Project-Rough-v0",
+  "training_run": "2026-08-17_10-00-56",
+  "checkpoint": "checkpoint/model_2999.pt",
+  "checkpoint_sha256": "44c35dac57e03de97c33b92aa73d73f2a28ca4538228286f6fa4d9f4a604b14a",
+  "config": "config/go1_rough_sim2real.yaml",
+  "policy": "policy/policy.pt",
+  "policy_sha256": "9d79e505959ce49a1115958a8b4dfc8a6e3f41bd84a8a23880be27a71c8a638d",
+  "onnx": "policy/policy.onnx",
+  "onnx_sha256": "9fd02ea9f5f1a114eae1c5f71da98a9597c3b38433c38b7bddbe5e7e8a160175",
+  "observation_dim": 235,
+  "action_dim": 12,
+  "hidden_layers": [512, 256, 128],
+  "action_scale": 0.25,
+  "height_scan_dim": 187,
+  "transport_default": "dry_run"
+}

@@ -57,11 +57,82 @@ def main() -> None:
         action="store_true",
         help="模型预热后停止原厂 sport mode，并在退出时恢复",
     )
+    parser.add_argument(
+        "--suspended-test",
+        action="store_true",
+        help="仅限吊挂测试：固定零速度输入并暂用零 base_lin_vel；禁止落地运行",
+    )
+    parser.add_argument(
+        "--suspended-remote-test",
+        action="store_true",
+        help="仅与 --suspended-test 配合：允许吊挂状态用遥控器给策略速度指令",
+    )
+    parser.add_argument(
+        "--ground-zero-velocity-test",
+        action="store_true",
+        help="吊带保护的短时落地试走：仅临时以零值代替未标定的 base_lin_vel",
+    )
+    parser.add_argument(
+        "--ground-remote-control",
+        action="store_true",
+        help="落地持续运动模式：模型起立后由遥控器给速度指令，直到 B/Ctrl+C 退出",
+    )
+    parser.add_argument(
+        "--remote-scale",
+        type=float,
+        default=1.0,
+        help="遥控速度额外缩放，必须在 (0,1]，首次吊挂测试建议 0.5",
+    )
+    parser.add_argument(
+        "--action-limit",
+        type=float,
+        help="仅允许缩小 policy.action_clip，用于分阶段吊挂测试",
+    )
     args = parser.parse_args()
     if args.steps < 0:
         raise SystemExit("--steps 不能为负数；使用 0 表示持续运行")
     if args.manage_sport_mode and args.dry_run:
         raise SystemExit("--manage-sport-mode 不能与 --dry-run 同时使用")
+    if args.suspended_test:
+        if args.dry_run or not args.enable_hardware:
+            raise SystemExit("--suspended-test 必须与真机 --enable-hardware 一起使用")
+        max_suspended_steps = 1500 if args.suspended_remote_test else 500
+        if args.steps <= 0 or args.steps > max_suspended_steps:
+            raise SystemExit(
+                f"--suspended-test 要求 1<=--steps<={max_suspended_steps}"
+            )
+        if args.suspended_remote_test:
+            if args.command_source != "remote":
+                raise SystemExit("--suspended-remote-test 要求 --command-source remote")
+        elif args.command_source == "remote" or np.max(np.abs(np.asarray(args.command))) > 0:
+            raise SystemExit("--suspended-test 默认只允许 --command-source fixed --command 0 0 0")
+    elif args.suspended_remote_test:
+        raise SystemExit("--suspended-remote-test 必须与 --suspended-test 一起使用")
+    if args.ground_zero_velocity_test and args.ground_remote_control:
+        raise SystemExit("两种地面测试模式不能同时使用")
+    if args.ground_zero_velocity_test:
+        command = np.asarray(args.command, dtype=np.float32)
+        if args.suspended_test or args.dry_run or not args.enable_hardware:
+            raise SystemExit("--ground-zero-velocity-test 只允许独立用于真机")
+        if not args.manage_sport_mode:
+            raise SystemExit("地面试走必须添加 --manage-sport-mode")
+        if args.command_source != "fixed":
+            raise SystemExit("首次地面试走只允许 --command-source fixed")
+        if args.steps <= 0 or args.steps > 150:
+            raise SystemExit("地面试走要求 1<=--steps<=150")
+        if not (0.0 <= command[0] <= 0.15) or np.max(np.abs(command[1:])) > 0:
+            raise SystemExit("地面试走只允许 vx 在 [0,0.15]，vy=wz=0")
+    if args.ground_remote_control:
+        if args.suspended_test or args.dry_run or not args.enable_hardware:
+            raise SystemExit("--ground-remote-control 只允许独立用于真机")
+        if not args.manage_sport_mode:
+            raise SystemExit("地面运动模式必须添加 --manage-sport-mode")
+        if args.command_source != "remote":
+            raise SystemExit("地面运动模式要求 --command-source remote")
+        if args.steps != 0:
+            raise SystemExit("地面运动模式要求 --steps 0 持续运行")
+    if not (0.0 < args.remote_scale <= 1.0):
+        raise SystemExit("--remote-scale 必须在 (0,1] 内")
 
     config = load_config(args.config)
     policy_path = args.policy
@@ -88,6 +159,21 @@ def main() -> None:
             validate_hardware_config(config)
         except ValueError as exc:
             raise SystemExit(f"真机配置未通过安全校验: {exc}") from exc
+    ground_policy_mode = args.ground_zero_velocity_test or args.ground_remote_control
+    if ground_policy_mode:
+        # 只绕过当前尚未完成的线速度输入；保留急停、姿态、关节、温度、
+        # 电压、通信时效和动作限幅。实测完全坐下时 Kp=20 无法抬起后躯，
+        # 因而一次接管内先以增强后腿增益起立，再直接进入短时策略测试。
+        config.safety["require_base_lin_vel_valid"] = False
+        ground_kp = [
+            30.0 if name.startswith(("RL_", "RR_")) else 20.0
+            for name in config.robot["joint_names"]
+        ]
+        config.transport["kp"] = ground_kp
+        config.transport["startup_kp"] = ground_kp
+        config.transport["startup_kp_limit"] = 30.0
+        config.transport["startup_transition_s"] = 10.0
+        config.transport["startup_max_tracking_error"] = 1.25
 
     policy = TorchScriptPolicy(policy_path)
     default_pos = np.asarray(config.robot["default_joint_pos"], dtype=np.float32)
@@ -110,6 +196,38 @@ def main() -> None:
         print("preflight 校验通过；未连接机器人")
         return
 
+    configured_action_clip_value = config.policy.get("action_clip")
+    configured_action_clip = (
+        None if configured_action_clip_value is None else float(configured_action_clip_value)
+    )
+    maximum_action_limit = float(
+        config.safety.get(
+            "max_deployment_action_limit",
+            1.0 if configured_action_clip is None else configured_action_clip,
+        )
+    )
+    deployment_action_limit = float(
+        config.safety.get(
+            "deployment_action_limit",
+            1.0 if configured_action_clip is None else configured_action_clip,
+        )
+    )
+    action_clip = deployment_action_limit if args.action_limit is None else float(args.action_limit)
+    if not (0.0 < action_clip <= maximum_action_limit):
+        raise SystemExit(
+            f"--action-limit 必须在 (0, safety.max_deployment_action_limit={maximum_action_limit}] 内"
+        )
+    if configured_action_clip is not None and action_clip > configured_action_clip:
+        raise SystemExit(
+            f"--action-limit 不能超过训练动作裁剪值 {configured_action_clip}"
+        )
+    ground_action_limit = 1.5 if args.ground_remote_control else 0.5
+    if ground_policy_mode and action_clip > ground_action_limit:
+        raise SystemExit(
+            f"当前地面运动模式的动作上限不得超过 {ground_action_limit}"
+        )
+
+    config.safety["runtime_action_limit"] = action_clip
     safety = SafetySupervisor(config.safety, default_pos)
     # 真机的逐帧遥控器状态仍由 SafetySupervisor 检查；这里仅打开软件总门。
     safety.set_enabled(True)
@@ -120,11 +238,15 @@ def main() -> None:
     max_command = float(config.safety.get("max_command_velocity", 1.0))
     if not use_remote_command and np.max(np.abs(np.asarray(args.command, dtype=np.float32))) > max_command:
         raise SystemExit(f"速度指令超过 safety.max_command_velocity={max_command}")
-    command_provider = (
-        RemoteVelocityCommand(config.transport.get("remote_control", {}))
-        if use_remote_command
-        else None
-    )
+    if use_remote_command:
+        remote_config = dict(config.transport.get("remote_control", {}))
+        remote_config["scales"] = (
+            np.asarray(remote_config.get("scales", [0.5, 0.3, 0.5]), dtype=np.float32)
+            * args.remote_scale
+        ).tolist()
+        command_provider = RemoteVelocityCommand(remote_config)
+    else:
+        command_provider = None
 
     log_stream = open(args.log_jsonl, "a", encoding="utf-8", buffering=1) if args.log_jsonl else None
 
@@ -154,6 +276,9 @@ def main() -> None:
                 "motor_temperatures": None if state.motor_temperatures is None else state.motor_temperatures.tolist(),
                 "enable_switch": state.enable_switch,
                 "emergency_stop": state.emergency_stop,
+                "foot_forces_estimated": None if state.foot_forces_estimated is None else state.foot_forces_estimated.tolist(),
+                "contact_count": state.contact_count,
+                "base_lin_vel_valid": state.base_lin_vel_valid,
             }
             log_stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -173,7 +298,16 @@ def main() -> None:
         elif args.dry_run:
             transport = DryRunTransport(default_pos)
         else:
-            transport = UnitreeSdkTransport(config=config.raw)
+            require_height_scan = bool(
+                config.observation.get("require_height_scan", False)
+            )
+            transport = UnitreeSdkTransport(
+                config=config.raw,
+                require_auxiliary=not (
+                    args.suspended_test
+                    or (ground_policy_mode and not require_height_scan)
+                ),
+            )
         run_control_loop(
             transport=transport,
             policy=policy,
@@ -182,7 +316,7 @@ def main() -> None:
             command=args.command,
             control_dt=float(config.robot["control_dt"]),
             steps=None if args.steps == 0 else args.steps,
-            action_clip=float(config.policy.get("action_clip", 1.0)),
+            action_clip=action_clip,
             on_step=report,
             command_provider=command_provider,
         )

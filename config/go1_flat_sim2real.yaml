@@ -1,8 +1,9 @@
 robot:
   control_dt: 0.02
   joint_count: 12
-  joint_names: [FL_hip_joint, FL_thigh_joint, FL_calf_joint, FR_hip_joint, FR_thigh_joint, FR_calf_joint, RL_hip_joint, RL_thigh_joint, RL_calf_joint, RR_hip_joint, RR_thigh_joint, RR_calf_joint]
-  default_joint_pos: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 1.0, -1.5, -0.1, 1.0, -1.5]
+  # Isaac Lab/PhysX resolved articulation order for the Go1 USD.
+  joint_names: [FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint, FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint, FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint]
+  default_joint_pos: [0.1, -0.1, 0.1, -0.1, 0.8, 0.8, 1.0, 1.0, -1.5, -1.5, -1.5, -1.5]
   action_scale: 0.25
 observation:
   terms: [base_lin_vel, base_ang_vel, projected_gravity, velocity_commands, joint_pos, joint_vel, actions]
@@ -13,4 +14,4 @@ policy:
   observation_dim: 48
   action_dim: 12
   hidden_layers: [512, 256, 128]
-  action_clip: 1.0
+  action_clip: null

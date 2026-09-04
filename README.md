@@ -8,8 +8,8 @@ Unitree Go1 的 sim2real 运行层，连接 Isaac Lab 训练策略与真实机�
 
 当前目录提供：
 
-- 235 维 Rough 观测拼接器；
-- skrl PPO checkpoint 到 TorchScript 的导出；
+- 48/235 维 Rough 观测拼接器；
+- skrl 导出策略和 RSL-RL TorchScript 部署策略的统一推理；
 - Go1 动作映射和安全层；
 - dry-run、JSONL 回放和 Unitree Go1 低层 SDK transport；
 - 外部里程计/187 点高度扫描 UDP 接口；
@@ -25,8 +25,8 @@ conda activate go1-sim2real
 python -m pip install -e . --no-deps
 python -m pytest -q
 python scripts/run_runtime.py \
-  --bundle artifacts/go1_sim2real_bundle \
-  --config config/go1_rough.yaml \
+  --bundle artifacts/yuanzhe/rough_48d_skrl_20260820 \
+  --config config/my_go1.yaml \
   --dry-run --steps 100
 ```
 
@@ -82,7 +82,7 @@ python3 scripts/read_robot_state.py \
 
 ```bash
 scripts/run_hardware_with_remote.sh \
-  --bundle artifacts/go1_sim2real_bundle \
+  --bundle artifacts/yuanzhe/rough_48d_skrl_20260820 \
   --config config/my_go1.yaml \
   --steps 0 \
   --log-jsonl hardware-run.jsonl
@@ -90,7 +90,27 @@ scripts/run_hardware_with_remote.sh \
 
 `--steps 0` 表示持续运行。不要绕过包装脚本同时运行 `Legged_sport` 和低层策略。
 
-## 48 维 Flat 策略
+## 模型目录和框架
+
+模型统一放在 `artifacts/<所有者>/<模型>/`，清单见
+[`artifacts/README.md`](artifacts/README.md)。当前主要模型是：
+
+- 你的 48D skrl 模型：`artifacts/yuanzhe/rough_48d_skrl_20260820`；
+- 你的早期 235D skrl 模型：`artifacts/yuanzhe/rough_235d_skrl_20260815`；
+- 队友 235D RSL-RL 模型：`artifacts/teammate/single_go1_rough_235d_rsl_rl_20260817`。
+
+skrl 与 RSL-RL 的完整 checkpoint 结构不同，不能互相当作训练 checkpoint 加载；但队友包
+已经包含标准 TorchScript `policy.pt`，运行层可直接推理，无需重建成 skrl 网络。队友模型
+离线验证命令：
+
+```bash
+python scripts/run_runtime.py \
+  --bundle artifacts/teammate/single_go1_rough_235d_rsl_rl_20260817 \
+  --config config/teammate_single_go1_rough_235d.yaml \
+  --dry-run --command 0 0 0 --steps 100
+```
+
+## 48 维无高度扫描策略
 
 如果没有与训练 RayCaster 等价的真实高度扫描，应重新训练 Flat policy。Flat actor 的
 观测顺序为：
@@ -109,10 +129,8 @@ python2 scripts/ros_odom_auxiliary_bridge.py \
   --odom-topic /ros2udp/odom --child-frame base_link --port 15001
 ```
 
-现有 `artifacts/go1_sim2real_bundle` 是 235 维 Rough 模型，不能与 Flat 配置混用。
-训练服务器必须重新训练 48 维 actor，并在新 bundle manifest 中声明
-`observation_dim: 48`、`height_scan_dim: 0` 以及 Flat 配置路径；运行层会拒绝维度或
-terms 不一致的模型。
+235 维 Rough bundle 不能与 48 维配置混用。运行层会根据 manifest 拒绝维度、terms、
+关节顺序或动作规格不一致的组合。
 
 重新训练得到 Flat `best_agent.pt` 后，在训练服务器的本仓库中导出：
 

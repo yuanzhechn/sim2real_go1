@@ -1,0 +1,23 @@
+robot:
+  control_dt: 0.02
+  joint_count: 12
+  joint_names: [FL_hip_joint, FR_hip_joint, RL_hip_joint, RR_hip_joint, FL_thigh_joint, FR_thigh_joint, RL_thigh_joint, RR_thigh_joint, FL_calf_joint, FR_calf_joint, RL_calf_joint, RR_calf_joint]
+  default_joint_pos: [0.1, -0.1, 0.1, -0.1, 0.8, 0.8, 1.0, 1.0, -1.5, -1.5, -1.5, -1.5]
+  action_scale: 0.25
+observation:
+  dimensions: [3, 3, 3, 3, 12, 12, 12]
+  history_length: 1
+policy:
+  observation_dim: 48
+  action_dim: 12
+  hidden_layers: [512, 256, 128]
+  action_clip: null
+safety:
+  max_roll_rad: 0.7
+  max_pitch_rad: 0.7
+  max_joint_error_rad: 1.2
+  max_action_delta: 0.25
+  stale_state_timeout_s: 0.15
+  require_enable_switch: true
+transport:
+  mode: dry_run

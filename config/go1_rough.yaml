@@ -7,18 +7,18 @@ robot:
   # 必须与 Isaac Lab UNITREE_GO1_CFG 的关节顺序一致。
   joint_names:
     - FL_hip_joint
-    - FL_thigh_joint
-    - FL_calf_joint
     - FR_hip_joint
-    - FR_thigh_joint
-    - FR_calf_joint
     - RL_hip_joint
-    - RL_thigh_joint
-    - RL_calf_joint
     - RR_hip_joint
+    - FL_thigh_joint
+    - FR_thigh_joint
+    - RL_thigh_joint
     - RR_thigh_joint
+    - FL_calf_joint
+    - FR_calf_joint
+    - RL_calf_joint
     - RR_calf_joint
-  default_joint_pos: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5, 0.1, 1.0, -1.5, -0.1, 1.0, -1.5]
+  default_joint_pos: [0.1, -0.1, 0.1, -0.1, 0.8, 0.8, 1.0, 1.0, -1.5, -1.5, -1.5, -1.5]
   action_scale: 0.25
   use_default_offset: true
 
@@ -84,11 +84,11 @@ transport:
     - RL_hip_joint
     - RL_thigh_joint
     - RL_calf_joint
-  # 下面仍是策略关节顺序（FL, FR, RL, RR），必须针对实物标定。
+  # 下面按 Isaac Lab policy 的 group-major 关节顺序排列。
   joint_directions: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
   joint_offsets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  joint_lower_limits: [-1.047, -0.663, -2.721, -1.047, -0.663, -2.721, -1.047, -0.663, -2.721, -1.047, -0.663, -2.721]
-  joint_upper_limits: [1.047, 2.966, -0.837, 1.047, 2.966, -0.837, 1.047, 2.966, -0.837, 1.047, 2.966, -0.837]
+  joint_lower_limits: [-1.047, -1.047, -1.047, -1.047, -0.663, -0.663, -0.663, -0.663, -2.721, -2.721, -2.721, -2.721]
+  joint_upper_limits: [1.047, 1.047, 1.047, 1.047, 2.966, 2.966, 2.966, 2.966, -0.837, -0.837, -0.837, -0.837]
   # 占位初值不是实物标定结果；hardware_validated=false 会阻止误启动。
   kp: [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
   kd: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]

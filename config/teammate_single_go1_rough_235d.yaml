@@ -1,0 +1,114 @@
+# 队友 single-go1 RSL-RL 235D Rough 模型的真机配置。
+# 该模型必须接收真实 base_lin_vel 和 187 点 height_scan；没有感知桥时只能 dry-run。
+robot:
+  name: unitree_go1
+  control_dt: 0.02
+  joint_count: 12
+  joint_names:
+    - FL_hip_joint
+    - FR_hip_joint
+    - RL_hip_joint
+    - RR_hip_joint
+    - FL_thigh_joint
+    - FR_thigh_joint
+    - RL_thigh_joint
+    - RR_thigh_joint
+    - FL_calf_joint
+    - FR_calf_joint
+    - RL_calf_joint
+    - RR_calf_joint
+  default_joint_pos: [0.1, -0.1, 0.1, -0.1, 0.8, 0.8, 1.0, 1.0, -1.5, -1.5, -1.5, -1.5]
+  action_scale: 0.25
+  use_default_offset: true
+
+observation:
+  terms: [base_lin_vel, base_ang_vel, projected_gravity, velocity_commands, joint_pos, joint_vel, actions, height_scan]
+  dimensions: [3, 3, 3, 3, 12, 12, 12, 187]
+  height_scan_clip: 1.0
+  history_length: 1
+  require_height_scan: true
+
+policy:
+  framework: rsl_rl
+  observation_dim: 235
+  action_dim: 12
+  hidden_layers: [512, 256, 128]
+  activation: elu
+  action_clip: null
+
+safety:
+  max_roll_rad: 0.7
+  max_pitch_rad: 0.7
+  max_joint_error_rad: 1.2
+  max_joint_velocity_rad_s: 25.0
+  max_motor_temperature_c: 70.0
+  min_battery_voltage_v: 19.0
+  allowed_motor_modes: [0, 10]
+  max_command_velocity: 1.0
+  max_action_delta: 0.25
+  deployment_action_limit: 0.5
+  max_deployment_action_limit: 3.0
+  stale_state_timeout_s: 0.15
+  stale_auxiliary_timeout_s: 0.15
+  require_enable_switch: true
+  require_base_lin_vel_valid: true
+  stand_on_fault: true
+
+transport:
+  mode: unitree_sdk
+  interface: eth0
+  state_timeout_s: 0.10
+  bootstrap_interval_s: 0.002
+  hardware_validated: true
+  calibration_id: "go1-unitree5151-suspended-20260821-v1"
+  sdk_module: robot_interface
+  sdk_python_path: /home/pi/yzWorkspace/unitree_legged_sdk/lib/python/arm64
+  local_port: 8090
+  target_ip: 192.168.123.10
+  target_port: 8007
+  watchdog_timeout_s: 0.10
+  startup_transition_s: 5.0
+  shutdown_transition_s: 3.0
+  startup_control_dt: 0.02
+  startup_kp: 10.0
+  startup_kd: 1.0
+  startup_max_tracking_error: 0.45
+  reject_sport_mode_process: true
+  sdk_joint_names:
+    - FR_hip_joint
+    - FR_thigh_joint
+    - FR_calf_joint
+    - FL_hip_joint
+    - FL_thigh_joint
+    - FL_calf_joint
+    - RR_hip_joint
+    - RR_thigh_joint
+    - RR_calf_joint
+    - RL_hip_joint
+    - RL_thigh_joint
+    - RL_calf_joint
+  joint_directions: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  joint_offsets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  joint_lower_limits: [-1.047, -1.047, -1.047, -1.047, -0.663, -0.663, -0.663, -0.663, -2.721, -2.721, -2.721, -2.721]
+  joint_upper_limits: [1.047, 1.047, 1.047, 1.047, 2.966, 2.966, 2.966, 2.966, -0.837, -0.837, -0.837, -0.837]
+  kp: [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
+  kd: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+  torque_ff: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  rpy_signs: [1, 1, 1]
+  angular_velocity_signs: [1, 1, 1]
+  enable_button: L2
+  enable_switch_mode: program
+  remote_startup_center_frames: 10
+  emergency_stop_button: B
+  remote_control:
+    deadband: 0.08
+    scales: [0.5, 0.3, 0.5]
+    signs: [1, -1, -1]
+  power_protect_level: 1
+  fault_damping_kd: 1.0
+  shutdown_damping_packets: 5
+  auxiliary_state:
+    mode: udp_json
+    bind_host: 127.0.0.1
+    bind_port: 15001
+    timeout_s: 0.10

@@ -102,3 +102,39 @@ def test_flat_bundle_declares_zero_height_scan_dimension(tmp_path: Path) -> None
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     bundle = load_bundle(root)
     assert bundle.manifest["height_scan_dim"] == 0
+
+
+def test_legacy_flat_bundle_infers_standard_term_order(tmp_path: Path) -> None:
+    root = _make_bundle(tmp_path)
+    config_path = root / "config" / "go1_rough_sim2real.yaml"
+    training = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    training["observation"].pop("terms")
+    training["observation"]["dimensions"] = [3, 3, 3, 3, 12, 12, 12]
+    training["observation"].pop("height_scan_clip")
+    training["policy"]["observation_dim"] = 48
+    config_path.write_text(yaml.safe_dump(training), encoding="utf-8")
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["observation_dim"] = 48
+    manifest["height_scan_dim"] = 0
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    bundle = load_bundle(root)
+
+    assert bundle.training_config["observation"]["terms"] == [
+        "base_lin_vel", "base_ang_vel", "projected_gravity", "velocity_commands",
+        "joint_pos", "joint_vel", "actions",
+    ]
+
+
+def test_checked_in_teammate_rsl_rl_bundle_matches_runtime_config() -> None:
+    root = Path(__file__).resolve().parents[1]
+    bundle = load_bundle(
+        root / "artifacts/teammate/single_go1_rough_235d_rsl_rl_20260817"
+    )
+    runtime = load_config(root / "config/teammate_single_go1_rough_235d.yaml")
+
+    validate_bundle_runtime_config(bundle, runtime)
+    assert bundle.manifest["framework"] == "rsl_rl"
+    assert bundle.manifest["height_scan_dim"] == 187
+    assert bundle.policy_path.name == "policy.pt"
