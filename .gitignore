@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 *.py[cod]
+*.jsonl
 artifacts/*.pt
 # TorchScript exports can be large; keep them local unless explicitly needed.
 # artifacts/*.ts

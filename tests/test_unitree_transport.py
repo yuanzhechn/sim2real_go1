@@ -30,6 +30,8 @@ class FakeLowState:
             rpy=[0.0, 0.0, 0.0],
         )
         self.bms = SimpleNamespace(cell_vol=[2500] * 10)
+        self.footForce = [200.0, 210.0, 220.0, 230.0]
+        self.footForceEst = [0.0, 0.0, 0.0, 0.0]
         self.wirelessRemote = [0, 0, 1 << 5, 0] + [0] * 36
 
 
@@ -150,6 +152,25 @@ def test_kinematic_flat_scan_mode_provides_nominal_rough_observation():
 
     assert np.all(state.height_scan == state.height_scan[0])
     assert -1.0 <= state.height_scan[0] <= 1.0
+    transport.close()
+
+
+def test_kinematic_mode_can_fall_back_to_raw_foot_forces():
+    config = make_config()
+    config["observation"]["require_height_scan"] = False
+    config["transport"]["auxiliary_state"] = {
+        "mode": "kinematic_contact",
+        "contact_threshold": 5.0,
+        "min_contacts": 2,
+        "use_raw_foot_force_fallback": True,
+    }
+    transport = UnitreeSdkTransport(config, FakeSdk, auxiliary_provider=None)
+
+    state = transport.read_state()
+
+    assert state.base_lin_vel_valid
+    assert state.contact_count == 4
+    assert np.all(np.isfinite(state.base_lin_vel))
     transport.close()
 
 

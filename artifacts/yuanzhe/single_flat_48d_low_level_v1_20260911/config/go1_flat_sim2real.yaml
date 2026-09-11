@@ -118,3 +118,5 @@ transport:
     filter_alpha: 0.2
     max_speed: 3.0
     max_no_contact_frames: 5
+    # 本机 LowState.footForceEst 恒为零，使用有实测值的 footForce 判定接触。
+    use_raw_foot_force_fallback: true

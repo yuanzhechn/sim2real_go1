@@ -168,6 +168,7 @@ class UnitreeSdkTransport:
         self._kinematic_scan_from_feet = False
         self._foot_radius = 0.02
         self._height_scan_offset = 0.5
+        self._raw_foot_force_fallback = False
 
         if (
             self._allow_commands
@@ -224,6 +225,9 @@ class UnitreeSdkTransport:
             if auxiliary_mode in {
                 "kinematic_contact", "kinematic_contact_flat_scan"
             }:
+                self._raw_foot_force_fallback = bool(
+                    auxiliary.get("use_raw_foot_force_fallback", False)
+                )
                 self._velocity_estimator = Go1ContactVelocityEstimator(
                     contact_threshold=float(auxiliary.get("contact_threshold", 5.0)),
                     min_contacts=int(auxiliary.get("min_contacts", 2)),
@@ -424,8 +428,13 @@ class UnitreeSdkTransport:
         base_lin_vel_valid = True
         contact_count = None
         if self._velocity_estimator is not None:
+            estimator_forces = foot_forces_estimated
+            if self._raw_foot_force_fallback and not np.any(
+                foot_forces_estimated >= self._velocity_estimator.contact_threshold
+            ):
+                estimator_forces = foot_forces
             base_lin_vel = self._velocity_estimator.update(
-                positions, velocities, angular_velocity, foot_forces_estimated
+                positions, velocities, angular_velocity, estimator_forces
             )
             if self._kinematic_scan_from_feet:
                 scan_value = (
@@ -446,6 +455,7 @@ class UnitreeSdkTransport:
             from .sensors import AuxiliaryState
 
             auxiliary = AuxiliaryState(np.zeros(3), np.zeros(187), now)
+            base_lin_vel_valid = False
         else:
             auxiliary = self._auxiliary_provider.read()
         cell_voltage = np.asarray(getattr(self._state.bms, "cell_vol", ()), dtype=np.float32)

@@ -298,15 +298,11 @@ def main() -> None:
         elif args.dry_run:
             transport = DryRunTransport(default_pos)
         else:
-            require_height_scan = bool(
-                config.observation.get("require_height_scan", False)
-            )
             transport = UnitreeSdkTransport(
                 config=config.raw,
-                require_auxiliary=not (
-                    args.suspended_test
-                    or (ground_policy_mode and not require_height_scan)
-                ),
+                # 地面模式仍必须构造速度观测源；绕过的是失效保护，
+                # 不是把策略所需的 base_lin_vel 永久替换为零。
+                require_auxiliary=not args.suspended_test,
             )
         run_control_loop(
             transport=transport,
