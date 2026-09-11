@@ -19,12 +19,14 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--obs-dim", type=int, default=235)
     parser.add_argument("--action-dim", type=int, default=12)
+    parser.add_argument("--hidden-layers", nargs="+", type=int, default=[512, 256, 128])
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
     policy = SkrlPPOPolicy.from_checkpoint(
         args.checkpoint,
         observation_dim=args.obs_dim,
         action_dim=args.action_dim,
+        hidden_layers=tuple(args.hidden_layers),
         device=args.device,
     )
     policy.export(args.output)

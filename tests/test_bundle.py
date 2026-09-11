@@ -127,14 +127,15 @@ def test_legacy_flat_bundle_infers_standard_term_order(tmp_path: Path) -> None:
     ]
 
 
-def test_checked_in_teammate_rsl_rl_bundle_matches_runtime_config() -> None:
+def test_checked_in_current_skrl_bundle_matches_runtime_config() -> None:
     root = Path(__file__).resolve().parents[1]
     bundle = load_bundle(
-        root / "artifacts/teammate/single_go1_rough_235d_rsl_rl_20260817"
+        root / "artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911"
     )
-    runtime = load_config(root / "config/teammate_single_go1_rough_235d.yaml")
+    runtime = load_config(root / "config/yuanzhe_single_flat_48d_low_level_v1.yaml")
 
     validate_bundle_runtime_config(bundle, runtime)
-    assert bundle.manifest["framework"] == "rsl_rl"
-    assert bundle.manifest["height_scan_dim"] == 187
-    assert bundle.policy_path.name == "policy.pt"
+    assert bundle.manifest["framework"] == "skrl"
+    assert bundle.manifest["height_scan_dim"] == 0
+    assert bundle.manifest["hidden_layers"] == [128, 128, 128]
+    assert bundle.policy_path.name == "go1_flat_policy.ts"

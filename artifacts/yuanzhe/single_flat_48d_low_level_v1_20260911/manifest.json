@@ -1,0 +1,21 @@
+{
+  "created_at_utc": "2026-09-11T05:46:47.346091+00:00",
+  "framework": "skrl",
+  "training_run": "2026-09-11_10-00-53_ppo_torch_flat_48d_low_level_v1",
+  "source_checkpoint": "/workspace/Multi_UnitreeGo1/logs/skrl/multi_unitreego1_single_flat/2026-09-11_10-00-53_ppo_torch_flat_48d_low_level_v1/checkpoints/best_agent.pt",
+  "checkpoint": "checkpoint/best_agent.pt",
+  "checkpoint_sha256": "3ba6257c81f9be5ef9069c33918e32cfb68d73e4344ea145ce6cf1e8176b4325",
+  "policy": "policy/go1_flat_policy.ts",
+  "policy_sha256": "4e03b5076f5f8f556c61c62e37bc30a8510ff3344ea5a955d6e9edac1dd65637",
+  "config": "config/go1_flat_sim2real.yaml",
+  "observation_dim": 48,
+  "action_dim": 12,
+  "hidden_layers": [
+    128,
+    128,
+    128
+  ],
+  "action_scale": 0.25,
+  "height_scan_dim": 0,
+  "transport_default": "unitree_sdk"
+}
