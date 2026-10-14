@@ -1,0 +1,40 @@
+[
+  {
+    "log": "logs/19499_walk005_trial.json",
+    "result": "short_test_completed",
+    "model": 19499,
+    "forward_command_m_s": 0.05,
+    "action_limit": 0.5,
+    "frames_sent": 750,
+    "deadline_misses": 0,
+    "compute_max_ms": 13.72782200007805,
+    "mean_forward_velocity_estimate_m_s": 0.0006433531265938654,
+    "final_body_frame_displacement_estimate_m": [
+      0.0222853384912014,
+      0.005452722776681185,
+      0.0040770103223621845
+    ],
+    "operator_observation": "User observed standing only; walking not demonstrated",
+    "walking_validated": false,
+    "model_validated": false
+  },
+  {
+    "log": "logs/19499_walk005_limit1_trial.json",
+    "result": "short_test_completed",
+    "model": 19499,
+    "forward_command_m_s": 0.05,
+    "action_limit": 1.0,
+    "frames_sent": 750,
+    "deadline_misses": 0,
+    "compute_max_ms": 15.217755999856308,
+    "mean_forward_velocity_estimate_m_s": 0.0017549453154788353,
+    "final_body_frame_displacement_estimate_m": [
+      0.03397134318947792,
+      0.029788000509142876,
+      0.015129967592656612
+    ],
+    "operator_observation": "Pending user observation; telemetry does not establish steady walking",
+    "walking_validated": false,
+    "model_validated": false
+  }
+]

@@ -77,3 +77,28 @@ def test_requested_effort_checks_position_and_damping_together():
         tool.enforce_pd_effort(np.full(12,.45),s,np.full(12,35.),np.ones(12),np.zeros(12))
     with pytest.raises(RuntimeError):
         tool.enforce_pd_effort(np.full(12,np.nan),s,np.full(12,35.),np.ones(12),np.zeros(12))
+
+
+def test_walking_profile_settles_ramps_and_returns_to_zero():
+    assert tool.walking_profile(0,.05)==([0.,0.,0.],.2)
+    assert tool.walking_profile(4,.05)==([.025,0.,0.],.35)
+    assert tool.walking_profile(7,.05)==([.05,0.,0.],.5)
+    assert tool.walking_profile(11,.05)==([.025,0.,0.],.35)
+    assert tool.walking_profile(13,.05)==([0.,0.,0.],.2)
+    assert tool.walking_profile(7,0)==([0.,0.,0.],.2)
+    assert tool.walking_profile(7,.05,1.)==([.05,0.,0.],1.)
+    assert tool.walking_profile(13,.05,1.)==([0.,0.,0.],.2)
+    with pytest.raises(ValueError):tool.walking_profile(7,.05,2.)
+
+
+@pytest.mark.parametrize('fault',['velocity_invalid','too_fast','no_contact','travel','lateral','heading'])
+def test_walking_faults_stop_motion(fault):
+    s=state();s.base_lin_vel=np.zeros(3);s.contact_count=4
+    displacement=np.zeros(3);yaw=0.
+    if fault=='velocity_invalid':s.base_lin_vel_valid=False
+    elif fault=='too_fast':s.base_lin_vel[0]=.4
+    elif fault=='no_contact':s.contact_count=0
+    elif fault=='travel':displacement[0]=.31
+    elif fault=='lateral':displacement[1]=.11
+    else:yaw=.26
+    with pytest.raises(RuntimeError):tool.validate_walking_state(s,displacement,yaw)

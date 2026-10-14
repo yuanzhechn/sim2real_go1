@@ -55,6 +55,25 @@ def enforce_pd_effort(target, state, kp, kd, torque_ff):
     return effort
 
 
+def walking_profile(elapsed_s, forward_speed, walking_action_limit=.5):
+    """15s trial: 3s settle, 2s ramp, 5s move, 2s ramp down, 3s settle."""
+    if not np.isfinite(elapsed_s) or elapsed_s<0 or forward_speed not in (0.,.05) or walking_action_limit not in (.5,1.):
+        raise ValueError('Invalid protected walking profile')
+    ratio=max(0.,min(1.,(elapsed_s-3.)/2.,(12.-elapsed_s)/2.))
+    return [forward_speed*ratio,0.,0.], .2+(walking_action_limit-.2)*ratio if forward_speed else .2
+
+
+def validate_walking_state(state, displacement, yaw_change):
+    if not state.base_lin_vel_valid or not np.isfinite(state.base_lin_vel).all():
+        raise RuntimeError('Walking requires a valid velocity estimate')
+    if np.linalg.norm(state.base_lin_vel)>.3:
+        raise RuntimeError('Protected walking speed exceeds 0.3m/s')
+    if state.contact_count is None or state.contact_count<1:
+        raise RuntimeError('Walking has no estimated foot support')
+    if np.linalg.norm(displacement)>.3 or abs(displacement[1])>.1 or abs(yaw_change)>.25:
+        raise RuntimeError('Protected walking travel or heading limit')
+
+
 def support_pose_geometry(joint_pos, projected_gravity):
     """Flat-floor estimate only; cannot replace operator confirmation of knee clearance."""
     q=Go1ContactVelocityEstimator.policy_to_leg_matrix(joint_pos)
@@ -85,13 +104,17 @@ def main():
     parser.add_argument('--ground-support-hold',action='store_true',help='Maintain rear Kp30 through actor takeover, with joint error guard')
     parser.add_argument('--rear-support-kp',type=float,choices=(30.,35.,40.),default=30.,help='Protected rear gain; requested PD effort is bounded to 20Nm')
     parser.add_argument('--backend',choices=('torchscript','numpy'),default='torchscript')
-    parser.add_argument('--hold-seconds',type=int,choices=(3,30),default=3)
+    parser.add_argument('--hold-seconds',type=int,choices=(3,15,30),default=3)
+    parser.add_argument('--forward-speed',type=float,choices=(0.,.05),default=0.,help='15s protected straight-walking profile, in m/s')
+    parser.add_argument('--walking-action-limit',type=float,choices=(.5,1.),default=.5)
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     if args.diagnostic_only and not args.enable_hardware:
         parser.error('Passive diagnostics require --enable-hardware and --protected')
     if args.enable_hardware and not args.protected:
         parser.error('Hardware test requires confirmed protective sling and remote emergency stop')
+    if args.forward_speed and (args.hold_seconds!=15 or not args.ground_support_hold or args.rear_support_kp!=40):
+        parser.error('Walking requires 15s duration and the confirmed rear Kp40 support profile')
     config=load_config(ROOT/'config/robots/unitree5151_19499.yaml')
     original=load_config(ROOT/'config/robots/unitree5151.yaml')
     validate_hardware_config(original)
@@ -125,11 +148,11 @@ def main():
         if not args.ground_support_startup:parser.error('Support hold requires the same support startup profile')
         raw['transport']['kp']=[args.rear_support_kp if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
-                         max_action_delta=.05,runtime_action_limit=.2,require_base_lin_vel_valid=False)
+                         max_action_delta=.05,runtime_action_limit=args.walking_action_limit if args.forward_speed else .2,require_base_lin_vel_valid=False)
     if args.ground_support_hold:raw['safety']['max_joint_error_rad']=.45
     safety=SafetySupervisor(raw['safety'],raw['robot']['default_joint_pos']);safety.set_enabled(True)
-    report=dict(model=19499,hardware=args.enable_hardware,protected=args.protected,command=[0,0,0],
-                action_limit=.2,model_validated=False,frames=[],result='not_started',
+    report=dict(model=19499,hardware=args.enable_hardware,protected=args.protected,command=[args.forward_speed,0,0],
+                action_limit=args.walking_action_limit if args.forward_speed else .2,model_validated=False,frames=[],result='not_started',
                 calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration,
                 backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold,rear_support_kp=args.rear_support_kp,requested_pd_effort_limit_nm=20.)
     args.output.parent.mkdir(parents=True,exist_ok=True)
@@ -201,18 +224,35 @@ def main():
         else:
             transport=DryRunTransport(np.array(raw['robot']['default_joint_pos']))
         started=time.monotonic();next_tick=started
+        displacement=np.zeros(3,dtype=np.float32);yaw_change=0.;previous_cycle=started
         last_safe=np.zeros(12,dtype=np.float32);last_good=started;misses=0
         for step in range(args.hold_seconds*50 if args.enable_hardware else 3):
             if time.monotonic()-started>args.hold_seconds:break
             cycle_start=time.monotonic()
             state=transport.read_state()
-            observation=builder.build(state,[0,0,0])
+            elapsed_s=time.monotonic()-started
+            command,action_limit=walking_profile(elapsed_s,args.forward_speed,args.walking_action_limit)
+            if args.forward_speed:
+                dt=min(.1,cycle_start-previous_cycle)
+                if elapsed_s>=3:
+                    displacement+=state.base_lin_vel*dt
+                    yaw_change+=float(state.base_ang_vel[2])*dt
+                    validate_walking_state(state,displacement,yaw_change)
+                if state.remote_axes is None or np.max(np.abs(state.remote_axes[:3]))>.08:
+                    raise RuntimeError('Protected walking requires centered remote sticks')
+            previous_cycle=cycle_start
+            observation=builder.build(state,command)
             action=np.asarray(policy(observation),dtype=np.float32)
-            action=np.clip(action,-.2,.2)
+            raw_action=action.copy()
+            action=np.clip(action,-action_limit,action_limit)
             filtered,result=safety.filter_action(state,action)
             compute_ms=(time.monotonic()-cycle_start)*1000
             record=dict(step=step,compute_ms=compute_ms,safety=result.reason,roll=state.roll,pitch=state.pitch,
                         action=filtered.tolist(),joint_pos=state.joint_pos.tolist(),contact_count=state.contact_count,action_sent=False,elapsed_s=time.monotonic()-started)
+            record.update(command=command,action_limit=action_limit,base_lin_vel=state.base_lin_vel.tolist(),base_lin_vel_valid=state.base_lin_vel_valid,estimated_displacement_body_m=displacement.tolist(),estimated_yaw_change_rad=yaw_change,
+                          raw_action=raw_action.tolist(),proprioception_observation=observation[:48].tolist(),
+                          foot_forces=None if state.foot_forces is None else state.foot_forces.tolist(),
+                          foot_forces_estimated=None if state.foot_forces_estimated is None else state.foot_forces_estimated.tolist())
             report['frames'].append(record)
             if not result.allowed:raise RuntimeError('Safety fault: '+result.reason)
             # No command from an over-budget policy cycle reaches the motors.
