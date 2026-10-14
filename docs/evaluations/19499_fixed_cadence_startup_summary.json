@@ -1,0 +1,14 @@
+{
+  "model": 19499,
+  "result": "aborted",
+  "reason": "\u542f\u52a8\u8fc7\u6e21\u5173\u8282\u672a\u8ddf\u968f\u76ee\u6807: error=0.451 rad joint=FR_calf_joint q=-2.548 target=-2.097",
+  "samples": 420,
+  "elapsed_s": 8.365236738999556,
+  "mean_read_interval_ms": 19.94787155370015,
+  "max_read_interval_ms": 24.695283000255586,
+  "actor_frames_sent": 0,
+  "max_joint_speed_rad_s": 0.3581967055797577,
+  "max_angular_speed_rad_s": 0.16128435730934143,
+  "vibration_improvement_validated": false,
+  "walking_validated": false
+}
