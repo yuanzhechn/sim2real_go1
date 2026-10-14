@@ -1,0 +1,15 @@
+{
+  "model": 19499,
+  "result": "short_test_completed",
+  "tested_code_commit": "cec2b4b",
+  "profile": "2s gain ramp, startup Kd2, hold Kd1, legacy startup cadence",
+  "configured_startup_s": 10,
+  "frames_sent": 1500,
+  "deadline_misses": 0,
+  "startup_tick_span": 15328,
+  "startup_read_span": 500,
+  "operator_observation": "Initially reported smaller vibration and stood independently; corrected to vibration not noticeably reduced",
+  "vibration_improvement_validated": false,
+  "walking_validated": false,
+  "new_16s_fixed_cadence_profile_hardware_tested": false
+}

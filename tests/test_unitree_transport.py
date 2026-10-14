@@ -222,6 +222,32 @@ def test_prepare_for_policy_smoothly_reaches_default(monkeypatch):
     transport.close()
 
 
+def test_startup_fixed_cadence_includes_read_and_send_time(monkeypatch):
+    config=make_config()
+    config['robot']['default_joint_pos']=[.5]*12
+    config['transport'].update(enable_switch_mode='program',remote_startup_center_frames=1,
+        remote_control={'deadband':.08},startup_transition_s=3.,startup_control_dt=1.,
+        startup_kp=5.,startup_kd=1.,startup_fixed_cadence=True)
+    clock=[10.]
+    sleeps=[]
+    monkeypatch.setattr('go1_sim2real.transport.time.monotonic',lambda:clock[0])
+    def sleep(seconds):
+        sleeps.append(seconds);clock[0]+=seconds
+    monkeypatch.setattr('go1_sim2real.transport.time.sleep',sleep)
+    transport=UnitreeSdkTransport(config,FakeSdk,FakeAuxiliary())
+    real_read=transport.read_state
+    real_send=transport._send_joint_target
+    def read():
+        sample=real_read();clock[0]+=.01;return sample
+    def send(*args,**kwargs):
+        real_send(*args,**kwargs);clock[0]+=.005
+    monkeypatch.setattr(transport,'read_state',read)
+    monkeypatch.setattr(transport,'_send_joint_target',send)
+    transport.prepare_for_policy()
+    np.testing.assert_allclose(sleeps[-3:],[.985]*3,atol=1e-8)
+    transport.close()
+
+
 def test_finish_policy_uses_configured_shutdown_transition(monkeypatch):
     config = make_config()
     config["transport"]["shutdown_transition_s"] = 4.0

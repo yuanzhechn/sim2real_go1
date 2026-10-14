@@ -115,7 +115,7 @@ def main():
     parser.add_argument('--enable-hardware',action='store_true')
     parser.add_argument('--protected',action='store_true')
     parser.add_argument('--diagnostic-only',action='store_true',help='Passive LowState initialization only; no joint targets')
-    parser.add_argument('--startup-duration',type=float,choices=(5.,10.),default=5.)
+    parser.add_argument('--startup-duration',type=float,choices=(5.,10.,16.),default=5.)
     parser.add_argument('--startup-calibrated-gain',action='store_true',help='Use existing robot calibrated Kp for the startup transition')
     parser.add_argument('--ground-support-startup',action='store_true',help='Use existing ground-start profile: front Kp20, rear Kp30')
     parser.add_argument('--ground-support-hold',action='store_true',help='Maintain rear Kp30 through actor takeover, with joint error guard')
@@ -133,6 +133,8 @@ def main():
         parser.error('Hardware test requires confirmed protective sling and remote emergency stop')
     if args.forward_speed and (args.hold_seconds!=15 or not args.ground_support_hold or args.rear_support_kp!=40):
         parser.error('Walking requires 15s duration and the confirmed rear Kp40 support profile')
+    if args.soft_startup and args.startup_duration!=16.:
+        parser.error('Revised soft startup requires 16s at fixed cadence; this profile is not hardware validated')
     config=load_config(ROOT/'config/robots/unitree5151_19499.yaml')
     original=load_config(ROOT/'config/robots/unitree5151.yaml')
     validate_hardware_config(original)
@@ -168,6 +170,7 @@ def main():
     if args.soft_startup:
         raw['transport']['startup_kd']=2.
         raw['transport']['kd']=[1.]*12
+        raw['transport']['startup_fixed_cadence']=True
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
                          max_action_delta=.05,runtime_action_limit=args.walking_action_limit if args.forward_speed else .2,require_base_lin_vel_valid=False)
     if args.ground_support_hold:raw['safety']['max_joint_error_rad']=.45
@@ -203,6 +206,8 @@ def main():
                 return
             deadline=time.monotonic()+30.
             report['startup_telemetry']=[]
+            report['startup_state_trace']=[]
+            samples_started=time.monotonic()
             read_count=0
             latest_state=None
             def guarded_read():
@@ -210,6 +215,10 @@ def main():
                 state=real_read()
                 if time.monotonic()>deadline: raise RuntimeError('Protected test wall-time limit')
                 validate_protected_state(state)
+                if not report.get('startup_completed',False):
+                    report['startup_state_trace'].append(dict(elapsed_s=time.monotonic()-samples_started,
+                        tick=transport._last_tick,joint_pos=state.joint_pos.tolist(),joint_vel=state.joint_vel.tolist(),
+                        base_ang_vel=state.base_ang_vel.tolist(),roll=state.roll,pitch=state.pitch))
                 if read_count % 50 == 0:
                     motors=list(transport._state.motorState)[:12]
                     commands=list(transport._cmd.motorCmd)[:12]

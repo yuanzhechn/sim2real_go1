@@ -610,6 +610,8 @@ class UnitreeSdkTransport:
             "default_q=" + np.array2string(self._default_joint_pos, precision=3),
             flush=True,
         )
+        next_tick = time.monotonic()
+        fixed_cadence = bool(self.config.get("startup_fixed_cadence", False))
         for step in range(steps):
             state = self.read_state()
             if state.emergency_stop:
@@ -650,7 +652,11 @@ class UnitreeSdkTransport:
                     f"base_lin_vel={np.array2string(state.base_lin_vel, precision=3)}",
                     flush=True,
                 )
-            time.sleep(dt)
+            if fixed_cadence:
+                next_tick += dt
+                time.sleep(max(0.0, next_tick - time.monotonic()))
+            else:
+                time.sleep(dt)
         self._last_action.fill(0.0)
 
     def finish_policy(self) -> None:
