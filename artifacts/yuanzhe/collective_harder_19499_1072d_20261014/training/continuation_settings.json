@@ -1,0 +1,51 @@
+{
+  "task": "Go1-Trot-EmpiricalPosture-v0",
+  "parent": "logs/rsl_rl/go1_paper_sim2real/collective_placement_20261012_v2/model_16500.pt",
+  "freeze_iterations": 0,
+  "posture_tightening": 0.5,
+  "learning_rate": 1e-05,
+  "posture_correction": true,
+  "parent_preservation": {
+    "learning_rate": 1e-05,
+    "freeze_iterations": 0,
+    "anchor_start": 0.4,
+    "anchor_end": 0.1,
+    "anchor_scope": "untouched_joints",
+    "drift_limit": 0.02
+  },
+  "anchor_decay_iterations": 2000,
+  "iterations": 3000,
+  "seed": 42,
+  "stride_events": true,
+  "front_sweep_profile": "None",
+  "front_sweep_weight": 2.0,
+  "front_sweep_gain": 0.2,
+  "flat_fraction": 0.4,
+  "adaptive_leg_profile": "None",
+  "adaptive_front_multiplier": 1.0,
+  "adaptive_gap_multiplier": 1.0,
+  "healthy_gait_profile": "logs/collective_harder_20261013/data/healthy_gait_profile.json",
+  "symmetry_loss": 0.02,
+  "far_map_loss": 0.1,
+  "healthy_near_body_multiplier": 8.0,
+  "healthy_near_body_start_multiplier": 4.0,
+  "front_placement_multiplier": 8.0,
+  "placement_ramp_steps": [
+    0,
+    14400
+  ],
+  "resume_reward_weights": true,
+  "world_size": 4,
+  "num_envs_per_rank": 8192,
+  "total_envs": 32768,
+  "harder_continuation": true,
+  "harder_reward_ramp_steps": 14400,
+  "placement_start_gain": 0.42857142857142855,
+  "harder_mix": {
+    "flat": 0.1,
+    "medium": 0.1,
+    "old_hard": 0.4,
+    "hard_complex": 0.2,
+    "technical": 0.2
+  }
+}

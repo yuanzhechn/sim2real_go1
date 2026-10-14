@@ -1,0 +1,84 @@
+robot:
+  name: unitree_go1
+  control_dt: 0.02
+  joint_count: 12
+  joint_names:
+  - FL_hip_joint
+  - FR_hip_joint
+  - RL_hip_joint
+  - RR_hip_joint
+  - FL_thigh_joint
+  - FR_thigh_joint
+  - RL_thigh_joint
+  - RR_thigh_joint
+  - FL_calf_joint
+  - FR_calf_joint
+  - RL_calf_joint
+  - RR_calf_joint
+  default_joint_pos:
+  - 0.1
+  - -0.1
+  - 0.1
+  - -0.1
+  - 0.75
+  - 0.75
+  - 0.75
+  - 0.75
+  - -1.5
+  - -1.5
+  - -1.5
+  - -1.5
+  action_scale: 0.25
+  use_default_offset: true
+observation:
+  terms:
+  - base_lin_vel
+  - base_ang_vel
+  - projected_gravity
+  - velocity_commands
+  - joint_pos
+  - joint_vel
+  - actions
+  - terrain_height_map
+  dimensions:
+  - 3
+  - 3
+  - 3
+  - 3
+  - 12
+  - 12
+  - 12
+  - 1024
+  history_length: 1
+  require_height_scan: false
+  height_map:
+    frame: base_yaw_aligned
+    ordering: xy
+    shape_rows_y_columns_x:
+    - 16
+    - 32
+    flattening: x_changes_fastest_then_y
+    resolution_m: 0.1
+    forward_extent_m:
+    - 0.0
+    - 3.1
+    lateral_extent_m:
+    - -0.75
+    - 0.75
+    value_definition: terrain_z_minus_base_z
+    value_clip_m:
+    - -1.0
+    - 1.0
+    invalid_fill: 0.0
+policy:
+  framework: rsl_rl
+  observation_dim: 1072
+  action_dim: 12
+  hidden_layers:
+  - 512
+  - 256
+  - 128
+  activation: elu
+  action_clip: null
+  obs_normalization: false
+  recurrent: false

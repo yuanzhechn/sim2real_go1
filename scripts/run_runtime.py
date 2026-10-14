@@ -174,13 +174,17 @@ def main() -> None:
         config.transport["startup_transition_s"] = 10.0
         config.transport["startup_max_tracking_error"] = 1.25
 
-    policy = TorchScriptPolicy(policy_path)
+    policy = TorchScriptPolicy(
+        policy_path, cpu_threads=config.policy.get("cpu_threads"),
+        freeze_for_inference=bool(config.policy.get("freeze_for_inference", False)),
+    )
     default_pos = np.asarray(config.robot["default_joint_pos"], dtype=np.float32)
     builder = Go1ObservationBuilder(
         history_length=int(config.observation.get("history_length", 1)),
         height_scan_clip=float(config.observation.get("height_scan_clip", 1.0)),
         default_joint_pos=default_pos,
         terms=config.observation.get("terms"),
+        height_map_mode=config.observation.get("height_map_mode", "state"),
     )
     # 在打开真机 UDP 和建立低层状态通道前完成模型加载/签名检查。PyTorch 首次
     # 加载在 ARM64 上可能耗时数秒，不能让硬件在这段时间处于半初始化状态。
@@ -195,6 +199,9 @@ def main() -> None:
         print("preflight 校验通过；未连接机器人")
         return
 
+    if "terrain_height_map" in config.observation["terms"]:
+        print("height_map_mode=" + config.observation["height_map_mode"] + "; unknown cells use height=0, validity=0")
+        config.safety["require_height_map_valid"] = config.observation["height_map_mode"] == "udp_json" and not args.dry_run
     configured_action_clip_value = config.policy.get("action_clip")
     configured_action_clip = (
         None if configured_action_clip_value is None else float(configured_action_clip_value)
@@ -269,6 +276,8 @@ def main() -> None:
                 "joint_pos": state.joint_pos.tolist(),
                 "joint_vel": state.joint_vel.tolist(),
                 "height_scan": state.height_scan.tolist(),
+                "terrain_heights": state.terrain_heights.tolist(),
+                "terrain_validity": state.terrain_validity.tolist(),
                 "roll": state.roll,
                 "pitch": state.pitch,
                 "battery_voltage": state.battery_voltage,

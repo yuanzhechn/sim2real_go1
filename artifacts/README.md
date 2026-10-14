@@ -12,10 +12,11 @@ artifacts/<owner>/<task>_<obs>_<variant>_<date>/
 └── DEPLOYMENT_README.md
 ```
 
-当前只保留：
+当前版本化模型：
 
 | 所有者 | Bundle | 框架 | 观测/动作 | 用途 |
 |---|---|---|---:|---|
 | yuanzhe | `yuanzhe/single_flat_48d_low_level_v1_20260911` | skrl PPO | 48/12 | 单 Go1 平地低层策略 |
+| yuanzhe | `yuanzhe/collective_harder_19499_1072d_20261014` | RSL-RL PPO | 1072/12 | 高程图策略，离线部署已验证，盲走/硬件待验证 |
 
 运行时应始终传入完整 bundle 路径，不再维护旧模型兼容软链接。

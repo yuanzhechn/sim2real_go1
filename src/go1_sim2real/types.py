@@ -41,6 +41,8 @@ class RobotState:
     foot_forces_estimated: np.ndarray | None = None
     contact_count: int | None = None
     base_lin_vel_valid: bool = True
+    terrain_heights: np.ndarray = field(default_factory=lambda: np.zeros(512, dtype=np.float32))
+    terrain_validity: np.ndarray = field(default_factory=lambda: np.zeros(512, dtype=np.float32))
 
     def __post_init__(self) -> None:
         self.base_lin_vel = vector(self.base_lin_vel, 3, "base_lin_vel")
@@ -50,6 +52,10 @@ class RobotState:
         self.joint_vel = vector(self.joint_vel, 12, "joint_vel")
         self.last_action = vector(self.last_action, 12, "last_action")
         self.height_scan = vector(self.height_scan, 187, "height_scan")
+        from .elevation import elevation_observation
+        elevation = elevation_observation(self.terrain_heights, self.terrain_validity)
+        self.terrain_heights = elevation[:512].copy()
+        self.terrain_validity = elevation[512:].copy()
         if self.motor_temperatures is not None:
             self.motor_temperatures = vector(self.motor_temperatures, 12, "motor_temperatures")
         if self.motor_modes is not None:

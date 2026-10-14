@@ -10,7 +10,7 @@ from .types import RobotState, vector
 
 
 class Go1ObservationBuilder:
-    """按训练配置的 terms 顺序生成 Rough(235) 或 Flat(48) 观测。"""
+    """按训练配置的 terms 顺序生成 Rough(235)、Flat(48) 或 Elevation(1072) 观测。"""
 
     TERM_DIMENSIONS = {
         "base_lin_vel": 3,
@@ -22,7 +22,8 @@ class Go1ObservationBuilder:
         "actions": 12,
         "height_scan": 187,
     }
-    ROUGH_TERMS = tuple(TERM_DIMENSIONS)
+    TERM_DIMENSIONS["terrain_height_map"] = 1024
+    ROUGH_TERMS = tuple(name for name in TERM_DIMENSIONS if name != "terrain_height_map")
 
     def __init__(
         self,
@@ -30,9 +31,13 @@ class Go1ObservationBuilder:
         height_scan_clip: float = 1.0,
         default_joint_pos: object | None = None,
         terms: object | None = None,
+        height_map_mode: str = "state",
     ) -> None:
         if history_length < 1:
             raise ValueError("history_length 必须大于 0")
+        if height_map_mode not in {"state", "unknown", "udp_json"}:
+            raise ValueError("Unknown elevation input mode")
+        self.height_map_mode = height_map_mode
         self.history_length = history_length
         self.height_scan_clip = float(height_scan_clip)
         self.terms = tuple(self.ROUGH_TERMS if terms is None else terms)
@@ -69,6 +74,12 @@ class Go1ObservationBuilder:
                 state.height_scan, -self.height_scan_clip, self.height_scan_clip
             ),
         }
+        if "terrain_height_map" in self.terms:
+            from .elevation import elevation_observation
+            values["terrain_height_map"] = (
+                np.zeros(1024, dtype=np.float32) if self.height_map_mode == "unknown"
+                else elevation_observation(state.terrain_heights, state.terrain_validity)
+            )
         observation = np.concatenate(tuple(values[name] for name in self.terms)).astype(
             np.float32, copy=False
         )

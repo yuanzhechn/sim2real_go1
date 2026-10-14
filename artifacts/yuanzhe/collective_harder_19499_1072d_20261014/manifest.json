@@ -1,0 +1,22 @@
+{
+  "framework": "rsl_rl",
+  "checkpoint": "checkpoint/model_19499.pt",
+  "checkpoint_sha256": "119461a7d5a665f42fddefe48732bcfa932461a22bc256c1308009ddca9907d4",
+  "policy": "policy/policy.ts",
+  "policy_sha256": "a26ea44cc76e9687ad5043ec48061332f3ad8ed52209f8c22d4af3ad449ac540",
+  "config": "config/deployment.yaml",
+  "observation_dim": 1072,
+  "action_dim": 12,
+  "hidden_layers": [
+    512,
+    256,
+    128
+  ],
+  "action_scale": 0.25,
+  "height_scan_dim": 0,
+  "height_map_dim": 1024,
+  "recurrent": false,
+  "obs_normalization": false,
+  "source_iteration": 19499,
+  "deployment_status": "offline_validated_hardware_pending"
+}

@@ -5,13 +5,14 @@ Unitree Go1 部署运行层：策略加载、观测拼接、关节映射、遥�
 
 ## 当前模型
 
-当前 bundle：`artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911`。
+旧版平地 bundle：`artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911`。
 skrl PPO，48 维本体观测、12 维关节位置动作、50 Hz，网络 `[128,128,128]`。
 不需要摄像机；机身线速度由着地足运动学估计，仍需验证接触与速度估计质量。
 已有 SDK/关节/IMU 标定不代表此 checkpoint 已通过吊挂与落地验证。
 
-此旧模型不是 Go1_Locomotion 最新的 1072 维高程图策略；当前运行层仍仅支持原有
-48/235 维接口，未接入 512 点高程值和 512 个有效位。
+此旧模型不是 Go1_Locomotion 最新的 1072 维高程图策略；当前运行层已新增其 1072 维高程图接口。19499 的部署说明见
+[模型 README](artifacts/yuanzhe/collective_harder_19499_1072d_20261014/DEPLOYMENT_README.md)。
+无摄像机时使用显式 unknown 地形模式，目前仅离线部署验证，尚未通过盲走和新模型真机测试。
 
 ## 目录
 
@@ -77,3 +78,5 @@ scripts/run_hardware_with_remote.sh \
 旧技术记录见 [历史文档](docs/history/SIM2REAL_MIGRATION.md)，旧命令仅作历史资料。
 
 完成修改后验证、提交并及时推送 GitHub，规则见 [AGENTS.md](AGENTS.md)。
+
+19499 当前状态：模型安装与离线功能验证完成；完整控制循环 50 Hz 尚未通过，未启动电机。详细时限数据见 docs/deploy_19499.md。

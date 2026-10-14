@@ -85,6 +85,8 @@ class JsonlTransport:
             joint_vel=frame["joint_vel"],
             last_action=frame["last_action"],
             height_scan=frame["height_scan"],
+            terrain_heights=frame.get("terrain_heights", np.zeros(512)),
+            terrain_validity=frame.get("terrain_validity", np.zeros(512)),
             roll=float(frame.get("roll", 0.0)),
             pitch=float(frame.get("pitch", 0.0)),
             timestamp=float(frame.get("timestamp", time.monotonic())),
@@ -262,6 +264,7 @@ class UnitreeSdkTransport:
                     require_height_scan=bool(
                         self.observation_config.get("require_height_scan", True)
                     ),
+                    require_height_map=self.observation_config.get("height_map_mode") == "udp_json",
                 )
         self._auxiliary_provider = auxiliary_provider
 
@@ -470,6 +473,8 @@ class UnitreeSdkTransport:
             joint_vel=velocities,
             last_action=self._last_action,
             height_scan=auxiliary.height_scan,
+            terrain_heights=auxiliary.terrain_heights,
+            terrain_validity=auxiliary.terrain_validity,
             roll=float(rpy[0] * rpy_signs[0]),
             pitch=float(rpy[1] * rpy_signs[1]),
             timestamp=self._last_state_timestamp,

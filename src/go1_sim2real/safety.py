@@ -43,6 +43,8 @@ class SafetySupervisor:
             return SafetyResult(False, "communication_error")
         if bool(self.config.get("require_base_lin_vel_valid", False)) and not state.base_lin_vel_valid:
             return SafetyResult(False, "base_lin_vel_invalid")
+        if bool(self.config.get("require_height_map_valid", False)) and not np.any(state.terrain_validity):
+            return SafetyResult(False, "height_map_unavailable")
         if not self._enabled:
             return SafetyResult(False, "enable_switch_off")
         if state.enable_switch is False:

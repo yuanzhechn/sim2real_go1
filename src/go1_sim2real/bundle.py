@@ -115,6 +115,8 @@ def _validate_internal_spec(manifest: dict[str, Any], config: dict[str, Any]) ->
         "action_scale": float(robot["action_scale"]),
         "height_scan_dim": dimensions[terms.index("height_scan")] if "height_scan" in terms else 0,
     }
+    if "terrain_height_map" in terms:
+        checks["height_map_dim"] = dimensions[terms.index("terrain_height_map")]
     if sum(dimensions) * history_length != checks["observation_dim"]:
         raise ValueError("bundle observation dimensions/history 与 policy.observation_dim 不一致")
     for key, config_value in checks.items():
@@ -163,6 +165,8 @@ def validate_bundle_runtime_config(bundle: Sim2RealBundle, runtime: RuntimeConfi
                 runtime.observation.get("height_scan_clip"),
             )
         )
+    if "terrain_height_map" in source["observation"]["terms"]:
+        comparisons.append(("observation.height_map", source["observation"]["height_map"], runtime.observation.get("height_map")))
     for name, trained, deployed in comparisons:
         if isinstance(trained, (list, tuple)) or isinstance(deployed, (list, tuple)):
             matches = np.array_equal(np.asarray(trained), np.asarray(deployed))

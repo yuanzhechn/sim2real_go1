@@ -48,5 +48,6 @@ sudo /usr/bin/python3 tools/hardware/sport_mode_control.py start
 ## 后续高程图策略
 
 Go1_Locomotion 1072 维策略使用 48 维本体观测、512 个相对高程值和 512 个有效位。
-不能当作这里的 235 维、187 点 height_scan 策略运行。接入前需要复现网格坐标、顺序、
+19499 已按独立 terrain_height_map 接口接入，见 [部署记录](deploy_19499.md)。
+不能当作这里的 235 维、187 点 height_scan 策略运行。后续感知需要复现网格坐标、顺序、
 有效位、策略签名和 checkpoint 动作规格，并验证输入缺失、噪声与延迟条件。

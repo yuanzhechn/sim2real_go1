@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import socket
 import time
@@ -20,10 +20,16 @@ class AuxiliaryState:
     base_lin_vel: np.ndarray
     height_scan: np.ndarray
     timestamp: float
+    terrain_heights: np.ndarray = field(default_factory=lambda: np.zeros(512, dtype=np.float32))
+    terrain_validity: np.ndarray = field(default_factory=lambda: np.zeros(512, dtype=np.float32))
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "base_lin_vel", vector(self.base_lin_vel, 3, "base_lin_vel"))
         object.__setattr__(self, "height_scan", vector(self.height_scan, 187, "height_scan"))
+        from .elevation import elevation_observation
+        elevation = elevation_observation(self.terrain_heights, self.terrain_validity)
+        object.__setattr__(self, "terrain_heights", elevation[:512].copy())
+        object.__setattr__(self, "terrain_validity", elevation[512:].copy())
         if not np.isfinite(self.timestamp):
             raise ValueError("auxiliary timestamp 必须是有限值")
         if not np.all(np.isfinite(self.base_lin_vel)) or not np.all(np.isfinite(self.height_scan)):
@@ -49,6 +55,7 @@ class UdpJsonAuxiliaryStateProvider:
         bind_port: int,
         timeout_s: float = 0.10,
         require_height_scan: bool = True,
+        require_height_map: bool = False,
     ) -> None:
         self.timeout_s = float(timeout_s)
         if self.timeout_s <= 0:
@@ -58,6 +65,7 @@ class UdpJsonAuxiliaryStateProvider:
         self._socket.settimeout(self.timeout_s)
         self._latest: AuxiliaryState | None = None
         self.require_height_scan = bool(require_height_scan)
+        self.require_height_map = bool(require_height_map)
 
     def _decode(self, payload: bytes) -> AuxiliaryState:
         message = json.loads(payload.decode("utf-8"))
@@ -70,6 +78,8 @@ class UdpJsonAuxiliaryStateProvider:
             base_lin_vel=message["base_lin_vel"],
             height_scan=height_scan,
             timestamp=time.monotonic(),
+            terrain_heights=message["terrain_heights"] if self.require_height_map else message.get("terrain_heights", np.zeros(512)),
+            terrain_validity=message["terrain_validity"] if self.require_height_map else message.get("terrain_validity", np.zeros(512)),
         )
 
     def read(self) -> AuxiliaryState:

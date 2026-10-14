@@ -1,0 +1,30 @@
+control_frequency_hz: 50
+observation_dim: 1072
+proprioception_dim: 48
+height_point_count: 512
+height_validity_count: 512
+action_dim: 12
+action_scale: 0.25
+command_order: [vx, vy, wz]
+observation_order:
+  - base_linear_velocity_body_3
+  - base_angular_velocity_body_3
+  - projected_gravity_3
+  - velocity_command_vx_vy_wz_3
+  - joint_position_offset_12
+  - joint_velocity_12
+  - previous_action_12
+  - terrain_height_relative_to_base_512
+  - terrain_height_validity_512
+height_map:
+  frame: base_yaw_aligned
+  ordering: xy
+  shape_rows_y_columns_x: [16, 32]
+  flattening: x_changes_fastest_then_y
+  resolution_m: 0.1
+  forward_extent_m: [0.0, 3.1]
+  lateral_extent_m: [-0.75, 0.75]
+  value_definition: terrain_z_minus_base_z
+  value_clip_m: [-1.0, 1.0]
+  invalid_fill: 0.0
+notes: "Depth-camera deployment must reproduce this grid, ordering, sign, clipping, and validity mask exactly. Policy output is a 12-joint position offset relative to the default pose."

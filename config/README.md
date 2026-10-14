@@ -8,3 +8,5 @@
 
 配置不能互换。训练规格随 bundle 保存在 artifacts/；不要修改 bundle 内配置绕过校验。
 运行器必须显式传入 --config。
+
+- robots/unitree5151_19499.yaml：1072 维 19499 策略，无摄像机 unknown-map 模式，新模型真机与盲走验证状态为 false。

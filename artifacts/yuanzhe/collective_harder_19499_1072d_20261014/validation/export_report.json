@@ -1,0 +1,8 @@
+{
+  "checkpoint_sha256": "119461a7d5a665f42fddefe48732bcfa932461a22bc256c1308009ddca9907d4",
+  "max_abs_error": 0.0,
+  "samples": 32,
+  "torch_version": "2.10.0+cu128",
+  "camera_missing_samples": 16,
+  "note": "Numerical parity only; not locomotion or hardware qualification."
+}

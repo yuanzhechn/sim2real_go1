@@ -78,6 +78,17 @@ def _validate_config(config: RuntimeConfig) -> None:
         config.policy.get("observation_dim", -1)
     ):
         raise ValueError("observation.dimensions/history_length 与 policy.observation_dim 不一致")
+    if "terrain_height_map" in terms:
+        from .elevation import HEIGHT_MAP_SPEC
+        expected = list(Go1ObservationBuilder.ROUGH_TERMS[:-1]) + ["terrain_height_map"]
+        if list(terms) != expected or history_length != 1:
+            raise ValueError("Elevation policy requires the exact 1072-D term order")
+        if config.observation.get("height_map") != HEIGHT_MAP_SPEC:
+            raise ValueError("Elevation grid contract differs from training")
+        if config.observation.get("height_map_mode") not in {"unknown", "udp_json"}:
+            raise ValueError("height_map_mode must be unknown or udp_json")
+        if bool(config.observation.get("require_height_scan", True)):
+            raise ValueError("Elevation map cannot use the legacy height_scan")
     if int(config.policy.get("action_dim", 0)) != 12:
         raise ValueError("policy.action_dim 必须为 12")
 
@@ -109,6 +120,12 @@ def validate_hardware_config(config: RuntimeConfig) -> None:
         raise ValueError("transport.joint_directions 只能为 -1 或 1")
     if transport.get("enable_switch_mode", "toggle") not in {"toggle", "hold", "program"}:
         raise ValueError("transport.enable_switch_mode 必须为 toggle、hold 或 program")
+    if "terrain_height_map" in config.observation["terms"]:
+        mode = config.observation["height_map_mode"]
+        if mode == "unknown" and not transport.get("blind_deployment_validated", False):
+            raise ValueError("19499 unknown-map deployment has not passed blind locomotion validation")
+        if mode == "udp_json" and transport.get("auxiliary_state", {}).get("mode") != "udp_json":
+            raise ValueError("Elevation map requires a real UDP perception provider")
     auxiliary = transport.get("auxiliary_state", {})
     auxiliary_mode = auxiliary.get("mode")
     if auxiliary_mode not in {

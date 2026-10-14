@@ -4,6 +4,7 @@
 
 | 目录 | 工具 | 用途与依赖 |
 |---|---|---|
+| hardware | check_policy_offline.py | 无 SDK 的策略一致性检查和 CPU 推理计时 |
 | hardware | read_robot_state.py | SDK 只读状态检查，显式 --enable-hardware-read |
 | hardware | calibrate_joint_targets.py | 吊挂低增益标定，会驱动电机 |
 | hardware | calibrate_ground_contacts.py | 接触/速度估计标定，按工具硬件开关使用 |
@@ -18,3 +19,5 @@
 
 当前机器人使用接触运动学速度估计，不需要启动 ROS 桥接。
 训练侧 Isaac 工具需要训练机器上的 Isaac Lab，不属于 Go1 的运行依赖。
+
+`training/export_rsl_elevation_bundle.py`：严格导出 1072 维、无归一化/无循环状态的 RSL actor，生成 checkpoint 参考动作；拒绝覆盖已有 bundle。

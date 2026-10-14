@@ -71,9 +71,16 @@ class SkrlPPOPolicy:
 
 
 class TorchScriptPolicy:
-    def __init__(self, path: str | Path, device: str = "cpu") -> None:
+    def __init__(self, path: str | Path, device: str = "cpu", cpu_threads: int | None = None,
+                 freeze_for_inference: bool = False) -> None:
+        if cpu_threads is not None:
+            if not isinstance(cpu_threads, int) or not 1 <= cpu_threads <= 64:
+                raise ValueError("cpu_threads must be an integer in [1,64]")
+            torch.set_num_threads(cpu_threads)
         self.device = torch.device(device)
         self.model = torch.jit.load(str(path), map_location=self.device).eval()
+        if freeze_for_inference:
+            self.model = torch.jit.freeze(self.model)
 
     @torch.inference_mode()
     def __call__(self, observation: object) -> torch.Tensor:
