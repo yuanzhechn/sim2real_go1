@@ -16,7 +16,8 @@ sys.path.insert(0,str(ROOT/'src'))
 from go1_sim2real.bundle import load_bundle, validate_bundle_runtime_config
 from go1_sim2real.config import load_config, validate_hardware_config
 from go1_sim2real.observation import Go1ObservationBuilder
-from go1_sim2real.policy import TorchScriptPolicy
+from go1_sim2real.policy import TorchScriptPolicy, NumpyElevationPolicy
+from go1_sim2real.velocity_estimator import Go1ContactVelocityEstimator
 from go1_sim2real.safety import SafetySupervisor
 from go1_sim2real.transport import UnitreeSdkTransport, DryRunTransport
 
@@ -46,6 +47,25 @@ def enforce_control_budget(elapsed_ms):
         raise RuntimeError('20ms control budget exceeded: %.2fms'%elapsed_ms)
 
 
+def support_pose_geometry(joint_pos, projected_gravity):
+    """Flat-floor estimate only; cannot replace operator confirmation of knee clearance."""
+    q=Go1ContactVelocityEstimator.policy_to_leg_matrix(joint_pos)
+    gravity=np.asarray(projected_gravity,dtype=np.float32)
+    if not np.isfinite(q).all() or gravity.shape!=(3,) or not np.isfinite(gravity).all() or not .95 <= np.linalg.norm(gravity) <= 1.05:
+        raise ValueError('Support geometry requires finite joints and unit projected gravity')
+    feet=[];knees=[]
+    for leg in range(4):
+        q0,q1,_=q[leg]
+        rx=Go1ContactVelocityEstimator._rx(float(q0))
+        hip=np.array([Go1ContactVelocityEstimator.HIP_X[leg],Go1ContactVelocityEstimator.HIP_Y[leg],0.])
+        thigh=hip+rx@np.array([0.,Go1ContactVelocityEstimator.SIDE[leg]*.08,0.])
+        knee=thigh+rx@Go1ContactVelocityEstimator._ry(float(q1))@np.array([0.,0.,-.213])
+        foot,_=Go1ContactVelocityEstimator.foot_position_and_jacobian(leg,q[leg])
+        feet.append(float(foot@gravity));knees.append(float(knee@gravity))
+    height=float(np.median(feet)+.02)
+    return height,[height-z for z in knees]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--enable-hardware',action='store_true')
@@ -53,6 +73,10 @@ def main():
     parser.add_argument('--diagnostic-only',action='store_true',help='Passive LowState initialization only; no joint targets')
     parser.add_argument('--startup-duration',type=float,choices=(5.,10.),default=5.)
     parser.add_argument('--startup-calibrated-gain',action='store_true',help='Use existing robot calibrated Kp for the startup transition')
+    parser.add_argument('--ground-support-startup',action='store_true',help='Use existing ground-start profile: front Kp20, rear Kp30')
+    parser.add_argument('--ground-support-hold',action='store_true',help='Maintain rear Kp30 through actor takeover, with joint error guard')
+    parser.add_argument('--backend',choices=('torchscript','numpy'),default='torchscript')
+    parser.add_argument('--hold-seconds',type=int,choices=(3,30),default=3)
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     if args.diagnostic_only and not args.enable_hardware:
@@ -77,7 +101,7 @@ def main():
             raise RuntimeError('Hardware calibration changed: '+key)
     if config.observation['height_map_mode']!='unknown':
         raise RuntimeError('This protected test expects the explicit unknown map contract')
-    policy=None if args.diagnostic_only else TorchScriptPolicy(bundle.policy_path,cpu_threads=config.policy['cpu_threads'],freeze_for_inference=True)
+    policy=None if args.diagnostic_only else (NumpyElevationPolicy(bundle.policy_path) if args.backend=='numpy' else TorchScriptPolicy(bundle.policy_path,cpu_threads=config.policy['cpu_threads'],freeze_for_inference=True))
     builder=Go1ObservationBuilder(default_joint_pos=config.robot['default_joint_pos'],terms=config.observation['terms'],height_map_mode='unknown')
     if policy is not None:
         for _ in range(50): policy(np.zeros(1072,dtype=np.float32))
@@ -85,12 +109,20 @@ def main():
     if args.startup_calibrated_gain:
         raw['transport']['startup_kp']=calibrated_startup_gains(original.transport['kp'])
         raw['transport']['startup_kp_limit']=20.
+    if args.ground_support_startup:
+        raw['transport']['startup_kp']=[30. if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
+        raw['transport']['startup_kp_limit']=30.
+    if args.ground_support_hold:
+        if not args.ground_support_startup:parser.error('Support hold requires the same support startup profile')
+        raw['transport']['kp']=[30. if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
                          max_action_delta=.05,runtime_action_limit=.2,require_base_lin_vel_valid=False)
+    if args.ground_support_hold:raw['safety']['max_joint_error_rad']=.45
     safety=SafetySupervisor(raw['safety'],raw['robot']['default_joint_pos']);safety.set_enabled(True)
     report=dict(model=19499,hardware=args.enable_hardware,protected=args.protected,command=[0,0,0],
                 action_limit=.2,model_validated=False,frames=[],result='not_started',
-                calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration)
+                calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration,
+                backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     transport=None;restore=False
     control=ROOT/'tools/hardware/sport_mode_control.py'
@@ -144,11 +176,13 @@ def main():
             # Use verified interface gains; keep target, tracking and all other guards.
             transport.prepare_for_policy(duration=args.startup_duration)
             report['startup_completed']=True
+            deadline=time.monotonic()+args.hold_seconds+5.
         else:
             transport=DryRunTransport(np.array(raw['robot']['default_joint_pos']))
         started=time.monotonic();next_tick=started
-        for step in range(150 if args.enable_hardware else 3):
-            if time.monotonic()-started>3.:break
+        last_safe=np.zeros(12,dtype=np.float32);last_good=started;misses=0
+        for step in range(args.hold_seconds*50 if args.enable_hardware else 3):
+            if time.monotonic()-started>args.hold_seconds:break
             cycle_start=time.monotonic()
             state=transport.read_state()
             observation=builder.build(state,[0,0,0])
@@ -157,14 +191,35 @@ def main():
             filtered,result=safety.filter_action(state,action)
             compute_ms=(time.monotonic()-cycle_start)*1000
             record=dict(step=step,compute_ms=compute_ms,safety=result.reason,roll=state.roll,pitch=state.pitch,
-                        action=filtered.tolist(),joint_pos=state.joint_pos.tolist(),contact_count=state.contact_count,action_sent=False)
+                        action=filtered.tolist(),joint_pos=state.joint_pos.tolist(),contact_count=state.contact_count,action_sent=False,elapsed_s=time.monotonic()-started)
             report['frames'].append(record)
             if not result.allowed:raise RuntimeError('Safety fault: '+result.reason)
             # No command from an over-budget policy cycle reaches the motors.
-            if args.enable_hardware:enforce_control_budget(compute_ms)
+            if args.enable_hardware and args.hold_seconds==3:
+                enforce_control_budget(compute_ms)
+            elif args.enable_hardware and compute_ms>20:
+                misses+=1;report['deadline_misses']+=1
+                record['late_action_discarded']=True
+                if misses>=3 or time.monotonic()-last_good>.1:
+                    raise RuntimeError('Repeated missed deadlines or safe target older than 100ms')
+                safety._last_action=last_safe.copy()
+                filtered=last_safe.copy()
+                record['action']=filtered.tolist()
+            else:
+                misses=0;last_good=time.monotonic()
             transport.send_action(filtered)
+            last_safe=filtered.copy()
             record["action_sent"]=True
-            print(json.dumps(record),flush=True)
+            if step%50==0:
+                height,knee_heights=support_pose_geometry(state.joint_pos,state.projected_gravity)
+                record["flat_ground_knee_height_estimates_m"]=knee_heights
+                record['flat_ground_height_estimate_m']=height
+                report['latest']=record
+                if args.enable_hardware and args.hold_seconds>3 and height<.22:
+                    raise RuntimeError('Estimated support pose too low to claim standing')
+                if args.enable_hardware and args.ground_support_hold and step>=100 and min(knee_heights)<.07:
+                    raise RuntimeError('Rear/other knee estimated clearance below 7cm; standing not achieved')
+                print('STAND_STATUS '+json.dumps(record),flush=True)
             next_tick+=.02;time.sleep(max(0,next_tick-time.monotonic()))
         report['result']='short_test_completed'
     except BaseException as exc:

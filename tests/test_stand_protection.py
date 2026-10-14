@@ -53,3 +53,17 @@ def test_actual_latency_fault_still_rejected():
 
 def test_nonfinite_latency_rejected():
     with pytest.raises(RuntimeError):tool.enforce_control_budget(float('nan'))
+
+
+def test_folded_knees_are_distinguished_from_extended_stance():
+    standing=np.array([.1,-.1,.1,-.1]+[.75]*4+[-1.5]*4)
+    folded=np.array([.3,-.3,.3,-.3]+[1.19]*4+[-2.77]*4)
+    _,clear=tool.support_pose_geometry(standing,[0,0,-1])
+    _,low=tool.support_pose_geometry(folded,[0,0,-1])
+    assert min(clear)>.15
+    assert max(low)<.07
+
+
+def test_invalid_support_geometry_cannot_pass_clearance_guard():
+    with pytest.raises(ValueError):tool.support_pose_geometry(np.zeros(12),[0,0,0])
+    with pytest.raises(ValueError):tool.support_pose_geometry(np.full(12,np.nan),[0,0,-1])

@@ -89,3 +89,36 @@ class TorchScriptPolicy:
         if isinstance(output, (tuple, list)):
             output = output[0]
         return output.squeeze(0).cpu()
+
+
+class NumpyElevationPolicy:
+    """Float32 execution of the exact exported ELU elevation actor, no quantization."""
+    def __init__(self, path: str | Path):
+        import numpy as np
+        model=torch.jit.load(str(path),map_location='cpu').eval()
+        state=model.state_dict()
+        indexes=(0,2,4,6)
+        expected={f'mlp.{i}.{part}' for i in indexes for part in ('weight','bias')}
+        if set(state)!=expected:
+            raise ValueError('Only the verified unnormalized four-layer elevation actor is supported')
+        shapes=((512,1072),(256,512),(128,256),(12,128))
+        self.layers=[]
+        for i,shape in zip(indexes,shapes):
+            w=state[f'mlp.{i}.weight'].detach().numpy().copy()
+            b=state[f'mlp.{i}.bias'].detach().numpy().copy()
+            if w.shape!=shape or b.shape!=(shape[0],) or w.dtype!=np.float32 or b.dtype!=np.float32:
+                raise ValueError('Elevation architecture or dtype mismatch')
+            if not np.isfinite(w).all() or not np.isfinite(b).all():raise ValueError('Nonfinite weights')
+            self.layers.append((w,b))
+
+    def __call__(self, observation):
+        import numpy as np
+        h=np.asarray(observation,dtype=np.float32)
+        if h.shape!=(1072,) or not np.isfinite(h).all():raise ValueError('Expected finite 1072-D observation')
+        for i,(w,b) in enumerate(self.layers):
+            h=w@h+b
+            if i<3:
+                negative=h<0
+                h[negative]=np.expm1(h[negative])
+        if not np.isfinite(h).all():raise ValueError('Nonfinite policy output')
+        return h
