@@ -74,3 +74,42 @@ python tools/hardware/test_19499_stand.py --enable-hardware --protected \
 
 本机新增推理等价性、膝盖几何及既有保护共15项测试通过。
 后腿仍支地的结果不计为模型硬件验证、站立成功或无摄像机盲走成功。
+
+## 后腿35与请求力矩保护的前台试验
+
+用户要求继续后，先做被动诊断：24.416V、94%、最高电机温度55°C。
+后腿Kp30再次因后右小腿误差0.452rad退出；用户确认后膝盖仍在地面。
+本地训练资产配置使用Go1 ActuatorNetMLP（effort_limit=23.7），并非固定Kp20的PD模型。
+因此部署PD参数和模拟中的学习型电机模型存在差异，调试配置不能视为训练配置等价。
+
+新增 `--rear-support-kp 35` 小幅调整后腿支撑，并在每次位置目标发送前检查
+`Kp*(target-q)-Kd*dq+torque_ff` 的绝对值不超过20Nm。
+该值是请求力矩的估算，不是实测力矩认证；SDK PositionLimit和PowerProtect仍保留。
+保持0.45rad跟踪误差、6rad/s速度、60°C温度和其他既有保护。
+本机与远端16项推理等价性及保护测试通过。
+
+新一轮Kp35起身完成，19499发送1500帧、约30秒，平均计算9.58ms、最大16.97ms，无周期超时。
+结束前roll=-0.0207rad、pitch=0.0128rad；后膝盖平地离地估计0.153和0.163m。
+测试已按时结束，原厂keeper与sport进程运行。
+用户现场反馈：后膝盖稍离地后又接触地面，人工扶一下后站稳，随后测试到时卸力。
+因此Kp35只记录为人工辅助后稳定，不认定自主起身成功；运动学离地估计不能替代现场观察。
+摘要见 evaluations/19499_rear35_summary.json，详细原始日志保存在机器人 logs/19499_continue_support35.json。
+
+## Kp40现场确认自主起身
+
+保持前腿Kp20，将后腿起身和actor保持Kp设置为40，这是已有transport启动增益硬上限；
+每次请求的PD力矩仍限定20Nm，既有跟踪误差、速度、姿态、温度和急停保护没有放宽。
+这一轮用户明确确认“能自己站稳，后膝盖持续离地”。
+该结论限于本次受保护、零速、未知地图、动作限幅±0.2的30秒站立试验，
+未解锁正常部署验证标记，不表示盲走或长期运行已通过。
+
+复现本次前台短测：
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python -u tools/hardware/test_19499_stand.py \
+  --enable-hardware --protected --ground-support-startup --ground-support-hold \
+  --rear-support-kp 40 --startup-duration 10 --backend numpy --hold-seconds 30 \
+  --output logs/19499_protected_rear40.json
+```
+
+策略阶段到时后发送退出阻尼并恢复原厂控制，卸力是计划退出，不是持续站立模式。

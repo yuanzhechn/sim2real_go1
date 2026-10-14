@@ -47,6 +47,14 @@ def enforce_control_budget(elapsed_ms):
         raise RuntimeError('20ms control budget exceeded: %.2fms'%elapsed_ms)
 
 
+def enforce_pd_effort(target, state, kp, kd, torque_ff):
+    """Bound the requested PD effort; SDK protection still applies afterward."""
+    effort=np.asarray(kp)*(np.asarray(target)-state.joint_pos)-np.asarray(kd)*state.joint_vel+np.asarray(torque_ff)
+    if effort.shape!=(12,) or not np.isfinite(effort).all() or np.max(np.abs(effort))>20.:
+        raise RuntimeError('Protected requested PD effort exceeds 20Nm or is invalid')
+    return effort
+
+
 def support_pose_geometry(joint_pos, projected_gravity):
     """Flat-floor estimate only; cannot replace operator confirmation of knee clearance."""
     q=Go1ContactVelocityEstimator.policy_to_leg_matrix(joint_pos)
@@ -75,6 +83,7 @@ def main():
     parser.add_argument('--startup-calibrated-gain',action='store_true',help='Use existing robot calibrated Kp for the startup transition')
     parser.add_argument('--ground-support-startup',action='store_true',help='Use existing ground-start profile: front Kp20, rear Kp30')
     parser.add_argument('--ground-support-hold',action='store_true',help='Maintain rear Kp30 through actor takeover, with joint error guard')
+    parser.add_argument('--rear-support-kp',type=float,choices=(30.,35.,40.),default=30.,help='Protected rear gain; requested PD effort is bounded to 20Nm')
     parser.add_argument('--backend',choices=('torchscript','numpy'),default='torchscript')
     parser.add_argument('--hold-seconds',type=int,choices=(3,30),default=3)
     parser.add_argument('--output',type=Path,required=True)
@@ -110,11 +119,11 @@ def main():
         raw['transport']['startup_kp']=calibrated_startup_gains(original.transport['kp'])
         raw['transport']['startup_kp_limit']=20.
     if args.ground_support_startup:
-        raw['transport']['startup_kp']=[30. if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
-        raw['transport']['startup_kp_limit']=30.
+        raw['transport']['startup_kp']=[args.rear_support_kp if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
+        raw['transport']['startup_kp_limit']=args.rear_support_kp
     if args.ground_support_hold:
         if not args.ground_support_startup:parser.error('Support hold requires the same support startup profile')
-        raw['transport']['kp']=[30. if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
+        raw['transport']['kp']=[args.rear_support_kp if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
                          max_action_delta=.05,runtime_action_limit=.2,require_base_lin_vel_valid=False)
     if args.ground_support_hold:raw['safety']['max_joint_error_rad']=.45
@@ -122,7 +131,7 @@ def main():
     report=dict(model=19499,hardware=args.enable_hardware,protected=args.protected,command=[0,0,0],
                 action_limit=.2,model_validated=False,frames=[],result='not_started',
                 calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration,
-                backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold)
+                backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold,rear_support_kp=args.rear_support_kp,requested_pd_effort_limit_nm=20.)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     transport=None;restore=False
     control=ROOT/'tools/hardware/sport_mode_control.py'
@@ -151,8 +160,9 @@ def main():
             deadline=time.monotonic()+30.
             report['startup_telemetry']=[]
             read_count=0
+            latest_state=None
             def guarded_read():
-                nonlocal read_count
+                nonlocal read_count,latest_state
                 state=real_read()
                 if time.monotonic()>deadline: raise RuntimeError('Protected test wall-time limit')
                 validate_protected_state(state)
@@ -167,8 +177,19 @@ def main():
                     report['startup_telemetry'].append(row)
                     print('STARTUP_PACKET '+json.dumps(row),flush=True)
                 read_count+=1
+                latest_state=state
                 return state
             transport.read_state=guarded_read
+            real_send_target=transport._send_joint_target
+            def guarded_send_target(target,kp=None,kd=None,torque_ff=None):
+                if latest_state is None:raise RuntimeError('No fresh state for requested PD effort check')
+                validate_protected_state(latest_state)
+                enforce_pd_effort(target,latest_state,
+                    transport._kp if kp is None else kp,
+                    transport._kd if kd is None else kd,
+                    transport._torque_ff if torque_ff is None else torque_ff)
+                return real_send_target(target,kp=kp,kd=kd,torque_ff=torque_ff)
+            transport._send_joint_target=guarded_send_target
             state=transport.read_state()
             report['initial_q']=state.joint_pos.tolist()
             report['initial_roll_pitch']=[state.roll,state.pitch]

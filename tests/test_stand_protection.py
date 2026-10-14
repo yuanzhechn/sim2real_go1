@@ -67,3 +67,13 @@ def test_folded_knees_are_distinguished_from_extended_stance():
 def test_invalid_support_geometry_cannot_pass_clearance_guard():
     with pytest.raises(ValueError):tool.support_pose_geometry(np.zeros(12),[0,0,0])
     with pytest.raises(ValueError):tool.support_pose_geometry(np.full(12,np.nan),[0,0,-1])
+
+
+def test_requested_effort_checks_position_and_damping_together():
+    s=state();s.joint_pos=np.zeros(12);s.joint_vel=np.zeros(12)
+    tool.enforce_pd_effort(np.full(12,.45),s,np.full(12,35.),np.ones(12),np.zeros(12))
+    s.joint_vel=np.full(12,-6.)
+    with pytest.raises(RuntimeError,match='20Nm'):
+        tool.enforce_pd_effort(np.full(12,.45),s,np.full(12,35.),np.ones(12),np.zeros(12))
+    with pytest.raises(RuntimeError):
+        tool.enforce_pd_effort(np.full(12,np.nan),s,np.full(12,35.),np.ones(12),np.zeros(12))
