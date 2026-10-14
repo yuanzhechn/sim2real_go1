@@ -1,0 +1,82 @@
+{
+  "model": 19499,
+  "hardware": true,
+  "protected": true,
+  "command": [
+    0,
+    0,
+    0
+  ],
+  "action_limit": 0.2,
+  "model_validated": false,
+  "frames": [],
+  "result": "passive_diagnostics_completed",
+  "passive_state_warmup": [
+    {
+      "read_ms": 50.22093200022937,
+      "age_ms": 46.83814500003791,
+      "tick": 7542592,
+      "battery_voltage": 20.607999801635742,
+      "cell_vol_mV": [
+        3424,
+        3424,
+        32,
+        32,
+        3424,
+        3424,
+        3392,
+        32,
+        32,
+        3392
+      ],
+      "soc": 13,
+      "roll": 0.005210419651120901,
+      "pitch": 0.01960069127380848,
+      "max_motor_temperature": 55.0
+    },
+    {
+      "read_ms": 7.5375830001576105,
+      "age_ms": 7.131866000236187,
+      "tick": 7542659,
+      "battery_voltage": 20.607999801635742,
+      "cell_vol_mV": [
+        3424,
+        3424,
+        32,
+        32,
+        3424,
+        3424,
+        3392,
+        32,
+        32,
+        3392
+      ],
+      "soc": 13,
+      "roll": 0.005209716968238354,
+      "pitch": 0.019680457189679146,
+      "max_motor_temperature": 55.0
+    },
+    {
+      "read_ms": 8.524830000169459,
+      "age_ms": 8.316610000292712,
+      "tick": 7542687,
+      "battery_voltage": 20.607999801635742,
+      "cell_vol_mV": [
+        3424,
+        3424,
+        32,
+        32,
+        3424,
+        3424,
+        3392,
+        32,
+        32,
+        3392
+      ],
+      "soc": 13,
+      "roll": 0.005206470377743244,
+      "pitch": 0.019681813195347786,
+      "max_motor_temperature": 55.0
+    }
+  ]
+}
