@@ -30,7 +30,7 @@ def main() -> None:
     model_source = parser.add_mutually_exclusive_group(required=True)
     model_source.add_argument("--policy", help="直接加载 TorchScript 策略")
     model_source.add_argument("--bundle", help="加载并完整校验训练侧 sim2real bundle")
-    parser.add_argument("--config", default=str(ROOT / "config/go1_rough.yaml"))
+    parser.add_argument("--config", required=True, help="显式选择与 bundle 匹配的部署 YAML")
     parser.add_argument("--command", nargs=3, type=float, default=[0.2, 0.0, 0.0], metavar=("VX", "VY", "WZ"))
     parser.add_argument(
         "--command-source",
@@ -289,7 +289,7 @@ def main() -> None:
             subprocess.run(
                 [
                     "sudo", "-n", "/usr/bin/python3",
-                    str(ROOT / "scripts" / "sport_mode_control.py"), "stop",
+                    str(ROOT / "tools" / "hardware" / "sport_mode_control.py"), "stop",
                 ],
                 check=True,
             )
@@ -327,7 +327,7 @@ def main() -> None:
             subprocess.run(
                 [
                     "sudo", "-n", "/usr/bin/python3",
-                    str(ROOT / "scripts" / "sport_mode_control.py"), "start",
+                    str(ROOT / "tools" / "hardware" / "sport_mode_control.py"), "start",
                 ],
                 check=True,
             )

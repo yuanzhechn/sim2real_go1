@@ -1,3 +1,5 @@
+> 历史记录：描述旧模型与旧目录，不作为当前部署入口。当前命令见根目录 README.md，目录变更见 docs/reorganization.md。
+
 # Go1 Sim2Real 迁移与开发手册
 
 本文档专门说明当前 sim2real 项目已经完成什么、迁移到 Unitree Go1 还需要什么，以及真机开发时必须注意什么。它不是 README 的替代品；README 只负责项目入口和快速说明。

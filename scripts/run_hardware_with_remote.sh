@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPORT_CONTROL="${PROJECT_ROOT}/scripts/sport_mode_control.py"
+SPORT_CONTROL="${PROJECT_ROOT}/tools/hardware/sport_mode_control.py"
 RUNTIME="${PROJECT_ROOT}/scripts/run_runtime.py"
 PYTHON_BIN="${CONDA_PREFIX:-}/bin/python"
 

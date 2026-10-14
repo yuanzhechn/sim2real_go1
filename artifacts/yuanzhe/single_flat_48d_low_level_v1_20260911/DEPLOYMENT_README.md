@@ -20,7 +20,7 @@ conda activate go1-sim2real
 cd /home/pi/yzWorkspace/sim2real_go1
 python -u scripts/run_runtime.py \
   --bundle artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911 \
-  --config config/yuanzhe_single_flat_48d_low_level_v1.yaml \
+  --config config/robots/unitree5151.yaml \
   --command 0 0 0 --dry-run --steps 100
 ```
 

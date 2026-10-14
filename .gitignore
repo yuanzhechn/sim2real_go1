@@ -1,7 +1,16 @@
 __pycache__/
 .pytest_cache/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+logs/
 *.jsonl
-artifacts/*.pt
-# TorchScript exports can be large; keep them local unless explicitly needed.
-# artifacts/*.ts
+.env
+.env.*
+!.env.example
+# Existing versioned bundles stay tracked; review new model files explicitly.
+artifacts/**/*.pt
+artifacts/**/*.ts
+artifacts/**/*.onnx

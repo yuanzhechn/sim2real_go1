@@ -1,144 +1,79 @@
 # Go1 Sim2Real
 
-Unitree Go1 的 sim2real 运行层，连接 Isaac Lab 训练策略与真实机器人控制器。
+Unitree Go1 部署运行层：策略加载、观测拼接、关节映射、遥控器、急停和通信故障处理。
+工作目录：`/home/pi/yzWorkspace/sim2real_go1`。
 
-详细的完成状态、迁移步骤、真机接口和安全要求见：
+## 当前模型
 
-- [SIM2REAL_MIGRATION.md](SIM2REAL_MIGRATION.md)
+当前 bundle：`artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911`。
+skrl PPO，48 维本体观测、12 维关节位置动作、50 Hz，网络 `[128,128,128]`。
+不需要摄像机；机身线速度由着地足运动学估计，仍需验证接触与速度估计质量。
+已有 SDK/关节/IMU 标定不代表此 checkpoint 已通过吊挂与落地验证。
 
-当前目录提供：
+此旧模型不是 Go1_Locomotion 最新的 1072 维高程图策略；当前运行层仍仅支持原有
+48/235 维接口，未接入 512 点高程值和 512 个有效位。
 
-- 48/235 维 Rough 观测拼接器；
-- skrl 导出策略和 RSL-RL TorchScript 部署策略的统一推理；
-- Go1 动作映射和安全层；
-- dry-run、JSONL 回放和 Unitree Go1 低层 SDK transport；
-- 外部里程计/187 点高度扫描 UDP 接口；
-- 遥控器使能、急停、通信 watchdog、安全阻尼退出和真机日志。
+## 目录
 
-默认运行模式是 dry-run，不会发送任何机器人控制包。
+```text
+scripts/                 # 策略运行与真机包装入口
+src/go1_sim2real/         # 观测、策略、动作、安全、SDK、速度估计
+config/robots/           # 当前机器人配置
+config/templates/        # 训练导出规格模板
+config/legacy/           # 旧模型配置
+artifacts/               # 完整模型 bundle
+tools/hardware/          # 状态读取、标定、原厂模式管理
+tools/training/          # checkpoint 导出与 Isaac Lab 检查
+tools/bridges/           # 可选 ROS1 感知桥接
+tools/setup/             # SDK 构建
+patches/                 # SDK 兼容补丁
+tests/                   # 自动化测试
+docs/                    # 部署说明与历史记录
+logs/                    # 本地日志，Git 忽略
+```
 
-## 快速验证
+## 安装与离线验证
+
+从仓库根目录执行。新机器先执行 `conda env create -f environment.yml`。
 
 ```bash
-conda env create -f environment.yml
 conda activate go1-sim2real
 python -m pip install -e . --no-deps
 python -m pytest -q
+
 python scripts/run_runtime.py \
-  --bundle artifacts/yuanzhe/rough_48d_skrl_20260820 \
-  --config config/my_go1.yaml \
-  --dry-run --steps 100
-```
+  --bundle artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911 \
+  --config config/robots/unitree5151.yaml \
+  --dry-run --preflight-only
 
-优先使用 `--bundle`：运行层会校验 manifest、策略 SHA256，以及训练和部署配置中的
-观测维度、关节顺序、默认姿态、动作缩放和控制周期。只有单独复制策略文件时才使用
-`--policy artifacts/go1_rough_policy.ts`。
-
-## 真机接入
-
-Go1 使用 `unitree_legged_sdk`（不是面向 Go2 的 sdk2）。先构建官方 Go1 分支的低层
-Python wrapper；仓库脚本会应用 Python 3.11/现代 pybind11 所需的最小 CMake 兼容补丁：
-
-```bash
-git clone --branch go1 https://github.com/unitreerobotics/unitree_legged_sdk.git ../unitree_legged_sdk
-conda activate go1-sim2real
-scripts/build_unitree_sdk.sh ../unitree_legged_sdk
-```
-
-将输出的 `lib/python/arm64` 绝对路径填入 `transport.sdk_python_path`，确认可导入
-`robot_interface`。复制配置文件后逐项
-标定 `sdk_joint_names`、方向、零位、关节限位和 PD 参数。只读检查不会发送任何控制包：
-
-```bash
-python3 scripts/read_robot_state.py \
-  --config config/my_go1.yaml \
-  --enable-hardware-read
-```
-
-发送低层命令前必须按 Unitree 的安全流程停止本机 `Legged_sport`；运行层默认也会检查
-并拒绝两者并发。只读检查不要求停止该进程，但可能需要为本机 UDP 端口选择未占用值。
-低层 UDP 在新客户端首次发送前通常不会回传 LowState；显式真机模式会先发送零力矩、
-电机失能的被动初始化包建立状态通道，而只读模式始终保持零发送并可能因此超时。
-
-当前 Rough 策略必须接收真实的机身坐标系线速度与 187 点高度扫描。感知进程需向
-`transport.auxiliary_state.bind_port` 发送一帧一个 UDP JSON 包：
-
-```json
-{"base_lin_vel":[0.0,0.0,0.0],"height_scan":["严格按训练顺序排列的 187 个数值"]}
-```
-
-只有完成文档中的逐关节、坐标系、急停和吊挂验证后，才能把副本配置中的
-`transport.mode` 改为 `unitree_sdk`、填写非空 `calibration_id` 并将
-`hardware_validated` 改为 `true`。真机运行还必须同时传入 `--enable-hardware`，并建议
-始终使用 `--log-jsonl`。默认配置故意无法启动真机。
-
-真机默认由遥控摇杆直接产生模型的速度指令：左摇杆上下控制前后、左右控制横移，
-右摇杆左右控制偏航。启动时必须先让摇杆连续回中，随后自动使能，不要求持续按键。
-`B` 是锁存急停，按下后即使松开也不会恢复，必须退出并重新启动程序。
-
-使用下面的包装脚本运行真机。配置、bundle、SHA 和模型签名均通过且模型完成预热后，
-它才停止原厂 sport mode 及其自动拉起守护进程；策略正常退出、异常退出或收到
-`Ctrl-C` 后自动恢复原厂模式：
-
-```bash
-scripts/run_hardware_with_remote.sh \
-  --bundle artifacts/yuanzhe/rough_48d_skrl_20260820 \
-  --config config/my_go1.yaml \
-  --steps 0 \
-  --log-jsonl hardware-run.jsonl
-```
-
-`--steps 0` 表示持续运行。不要绕过包装脚本同时运行 `Legged_sport` 和低层策略。
-
-## 模型目录和框架
-
-模型统一放在 `artifacts/<所有者>/<模型>/`，清单见
-[`artifacts/README.md`](artifacts/README.md)。当前主要模型是：
-
-- 你的 48D skrl 模型：`artifacts/yuanzhe/rough_48d_skrl_20260820`；
-- 你的早期 235D skrl 模型：`artifacts/yuanzhe/rough_235d_skrl_20260815`；
-- 队友 235D RSL-RL 模型：`artifacts/teammate/single_go1_rough_235d_rsl_rl_20260817`。
-
-skrl 与 RSL-RL 的完整 checkpoint 结构不同，不能互相当作训练 checkpoint 加载；但队友包
-已经包含标准 TorchScript `policy.pt`，运行层可直接推理，无需重建成 skrl 网络。队友模型
-离线验证命令：
-
-```bash
 python scripts/run_runtime.py \
-  --bundle artifacts/teammate/single_go1_rough_235d_rsl_rl_20260817 \
-  --config config/teammate_single_go1_rough_235d.yaml \
+  --bundle artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911 \
+  --config config/robots/unitree5151.yaml \
   --dry-run --command 0 0 0 --steps 100
 ```
 
-## 48 维无高度扫描策略
+运行器要求显式传入 `--config`，避免误用旧 Rough 配置。
+`--dry-run` 和 JSONL 回放不连接机器人；遗漏真机使能参数会拒绝运行。
+Bundle 校验检查 SHA256、观测/动作维度、关节顺序、默认姿态、缩放和控制周期。
 
-如果没有与训练 RayCaster 等价的真实高度扫描，应重新训练 Flat policy。Flat actor 的
-观测顺序为：
+## 真机入口
 
-```text
-base_lin_vel(3), base_ang_vel(3), projected_gravity(3), commands(3),
-joint_pos_rel(12), joint_vel(12), previous_actions(12) = 48
-```
-
-`config/my_go1.yaml` 已按该规格准备，`require_height_scan: false`。Flat 仍需要真实机身
-速度；本机已有 `/ros2udp/odom` 时，另开一个终端启动桥接：
+阅读 [部署说明](docs/deployment.md)，完成当前模型的保护测试后使用：
 
 ```bash
-source /opt/ros/melodic/setup.bash
-python2 scripts/ros_odom_auxiliary_bridge.py \
-  --odom-topic /ros2udp/odom --child-frame base_link --port 15001
+mkdir -p logs
+scripts/run_hardware_with_remote.sh \
+  --bundle artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911 \
+  --config config/robots/unitree5151.yaml \
+  --steps 0 --log-jsonl logs/hardware-run.jsonl
 ```
 
-235 维 Rough bundle 不能与 48 维配置混用。运行层会根据 manifest 拒绝维度、terms、
-关节顺序或动作规格不一致的组合。
+此命令会发送电机控制。包装脚本在预检和预热完成后停止原厂 sport mode，退出时恢复。
+摇杆连续回中后使能，B 锁存急停，Ctrl-C 退出。代码维护仅使用离线验证命令。
 
-重新训练得到 Flat `best_agent.pt` 后，在训练服务器的本仓库中导出：
+模型索引见 [artifacts/README.md](artifacts/README.md)，
+工具入口见 [tools/README.md](tools/README.md)，
+目录迁移见 [docs/reorganization.md](docs/reorganization.md)。
+旧技术记录见 [历史文档](docs/history/SIM2REAL_MIGRATION.md)，旧命令仅作历史资料。
 
-```bash
-python scripts/export_flat_bundle.py \
-  --checkpoint /path/to/flat/checkpoints/best_agent.pt \
-  --output artifacts/go1_flat_bundle
-```
-
-这不是把旧模型裁剪成 48 维；导出器要求 checkpoint 本身就是以 48 维 actor 重新训练
-得到的模型。最终把整个 `go1_flat_bundle` 复制到 Go1。
+完成修改后验证、提交并及时推送 GitHub，规则见 [AGENTS.md](AGENTS.md)。

@@ -13,7 +13,7 @@ import sys
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from go1_sim2real.policy import SkrlPPOPolicy
@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument("--output", default=str(ROOT / "artifacts" / "go1_flat_bundle"))
     parser.add_argument(
         "--config",
-        default=str(ROOT / "config" / "go1_flat_sim2real.yaml"),
+        default=str(ROOT / "config" / "templates" / "go1_flat_sim2real.yaml"),
         help="与 checkpoint 训练规格匹配的部署 YAML",
     )
     parser.add_argument(

@@ -11,7 +11,7 @@ import time
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from go1_sim2real.config import load_config
@@ -20,7 +20,7 @@ from go1_sim2real.transport import UnitreeSdkTransport
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(ROOT / "config/my_go1.yaml"))
+    parser.add_argument("--config", default=str(ROOT / "config/robots/unitree5151.yaml"))
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--hold", type=float, default=1.0)
     parser.add_argument("--kp", type=float, default=5.0)

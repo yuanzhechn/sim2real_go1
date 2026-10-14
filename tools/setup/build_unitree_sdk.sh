@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 sdk_root=${1:-"$project_root/../unitree_legged_sdk"}
 
 if [[ -z "${CONDA_PREFIX:-}" ]]; then

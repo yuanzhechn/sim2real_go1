@@ -132,7 +132,7 @@ def test_checked_in_current_skrl_bundle_matches_runtime_config() -> None:
     bundle = load_bundle(
         root / "artifacts/yuanzhe/single_flat_48d_low_level_v1_20260911"
     )
-    runtime = load_config(root / "config/yuanzhe_single_flat_48d_low_level_v1.yaml")
+    runtime = load_config(root / "config/robots/unitree5151.yaml")
 
     validate_bundle_runtime_config(bundle, runtime)
     assert bundle.manifest["framework"] == "skrl"
