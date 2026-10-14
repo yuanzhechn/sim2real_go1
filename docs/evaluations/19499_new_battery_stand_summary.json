@@ -1,0 +1,28 @@
+{
+  "model": 19499,
+  "new_battery_soc": 88,
+  "new_battery_voltage": 23.93600082397461,
+  "startup_completed": true,
+  "configured_startup_duration": 10.0,
+  "startup_kp": 20,
+  "tracking_error_limit": 0.45,
+  "action_limit": 0.2,
+  "command": [
+    0,
+    0,
+    0
+  ],
+  "recorded_frames": 137,
+  "sent_actions": 136,
+  "result": "aborted",
+  "reason": "20ms control budget exceeded: 22.82ms",
+  "final_frame_sent": false,
+  "compute_ms_mean": 12.64542535766246,
+  "compute_ms_max": 22.818442000016148,
+  "roll_abs_max": 0.02082137204706669,
+  "pitch_abs_max": 0.2188812792301178,
+  "minimum_estimated_contacts": 4,
+  "factory_control_restored": true,
+  "model_hardware_validated": false,
+  "note": "136 actions sent; the last record was appended before the 20ms guard and was not sent. Protected short test, not long-run standing qualification."
+}

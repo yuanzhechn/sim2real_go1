@@ -22,4 +22,4 @@
 
 `training/export_rsl_elevation_bundle.py`：严格导出 1072 维、无归一化/无循环状态的 RSL actor，生成 checkpoint 参考动作；拒绝覆盖已有 bundle。
 
-`hardware/test_19499_stand.py`：用户明确确认吊带/急停后的 19499 短时零速调试；电池>=21V、动作±0.2、20ms周期保护、退出恢复原厂模式。当前真实尝试被13%电量拦截，未进入姿态过渡。见 docs/19499_protected_stand_test.md。
+`hardware/test_19499_stand.py`：用户明确确认吊带/急停后的 19499 短时零速调试；电池>=21V、动作±0.2、20ms周期保护、退出恢复原厂模式。换电池后用原标定Kp20与慢速过渡完成起身，并实际发送136帧19499动作，随后因周期超限退出。见 docs/19499_protected_stand_test.md。

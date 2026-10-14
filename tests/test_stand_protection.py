@@ -39,3 +39,17 @@ def test_other_guards_still_apply(fault,reason):
 
 def test_good_state_passes():
     tool.validate_protected_state(state())
+
+
+def test_calibrated_gain_cannot_exceed_known_limit():
+    assert tool.calibrated_startup_gains([20]*12)==[20.]*12
+    with pytest.raises(RuntimeError):tool.calibrated_startup_gains([30]*12)
+
+
+def test_actual_latency_fault_still_rejected():
+    with pytest.raises(RuntimeError,match='20ms'):tool.enforce_control_budget(22.818442)
+    tool.enforce_control_budget(14.2)
+
+
+def test_nonfinite_latency_rejected():
+    with pytest.raises(RuntimeError):tool.enforce_control_budget(float('nan'))

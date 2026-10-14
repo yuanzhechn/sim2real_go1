@@ -34,11 +34,25 @@ def validate_protected_state(state, now=None):
         raise RuntimeError('Joint velocity limit')
 
 
+def calibrated_startup_gains(values):
+    gains=np.asarray(values,dtype=np.float32)
+    if gains.shape!=(12,) or not np.all(np.isfinite(gains)) or np.any(gains<=0) or np.any(gains>20):
+        raise RuntimeError('Calibrated startup gain must be 12 values in (0,20]')
+    return gains.tolist()
+
+
+def enforce_control_budget(elapsed_ms):
+    if not np.isfinite(elapsed_ms) or elapsed_ms<0 or elapsed_ms>20:
+        raise RuntimeError('20ms control budget exceeded: %.2fms'%elapsed_ms)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--enable-hardware',action='store_true')
     parser.add_argument('--protected',action='store_true')
     parser.add_argument('--diagnostic-only',action='store_true',help='Passive LowState initialization only; no joint targets')
+    parser.add_argument('--startup-duration',type=float,choices=(5.,10.),default=5.)
+    parser.add_argument('--startup-calibrated-gain',action='store_true',help='Use existing robot calibrated Kp for the startup transition')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     if args.diagnostic_only and not args.enable_hardware:
@@ -68,11 +82,15 @@ def main():
     if policy is not None:
         for _ in range(50): policy(np.zeros(1072,dtype=np.float32))
     raw=copy.deepcopy(config.raw)
+    if args.startup_calibrated_gain:
+        raw['transport']['startup_kp']=calibrated_startup_gains(original.transport['kp'])
+        raw['transport']['startup_kp_limit']=20.
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
                          max_action_delta=.05,runtime_action_limit=.2,require_base_lin_vel_valid=False)
     safety=SafetySupervisor(raw['safety'],raw['robot']['default_joint_pos']);safety.set_enabled(True)
     report=dict(model=19499,hardware=args.enable_hardware,protected=args.protected,command=[0,0,0],
-                action_limit=.2,model_validated=False,frames=[],result='not_started')
+                action_limit=.2,model_validated=False,frames=[],result='not_started',
+                calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     transport=None;restore=False
     control=ROOT/'tools/hardware/sport_mode_control.py'
@@ -99,18 +117,32 @@ def main():
                 report['result']='passive_diagnostics_completed'
                 return
             deadline=time.monotonic()+30.
+            report['startup_telemetry']=[]
+            read_count=0
             def guarded_read():
+                nonlocal read_count
                 state=real_read()
                 if time.monotonic()>deadline: raise RuntimeError('Protected test wall-time limit')
                 validate_protected_state(state)
+                if read_count % 50 == 0:
+                    motors=list(transport._state.motorState)[:12]
+                    commands=list(transport._cmd.motorCmd)[:12]
+                    row=dict(read=read_count,tick=transport._last_tick,
+                        command_level=int(transport._cmd.levelFlag),state_level=int(transport._state.levelFlag),
+                        command_modes=[int(m.mode) for m in commands],state_modes=[int(m.mode) for m in motors],
+                        command_q=[float(m.q) for m in commands],command_kp=[float(m.Kp) for m in commands],
+                        measured_q=[float(m.q) for m in motors],measured_tau=[float(m.tauEst) for m in motors])
+                    report['startup_telemetry'].append(row)
+                    print('STARTUP_PACKET '+json.dumps(row),flush=True)
+                read_count+=1
                 return state
             transport.read_state=guarded_read
             state=transport.read_state()
             report['initial_q']=state.joint_pos.tolist()
             report['initial_roll_pitch']=[state.roll,state.pitch]
             report['battery_voltage']=state.battery_voltage
-            # Existing verified low-gain transition; no gain increase on an untested model.
-            transport.prepare_for_policy(duration=5.)
+            # Use verified interface gains; keep target, tracking and all other guards.
+            transport.prepare_for_policy(duration=args.startup_duration)
             report['startup_completed']=True
         else:
             transport=DryRunTransport(np.array(raw['robot']['default_joint_pos']))
@@ -125,12 +157,13 @@ def main():
             filtered,result=safety.filter_action(state,action)
             compute_ms=(time.monotonic()-cycle_start)*1000
             record=dict(step=step,compute_ms=compute_ms,safety=result.reason,roll=state.roll,pitch=state.pitch,
-                        action=filtered.tolist(),joint_pos=state.joint_pos.tolist(),contact_count=state.contact_count)
+                        action=filtered.tolist(),joint_pos=state.joint_pos.tolist(),contact_count=state.contact_count,action_sent=False)
             report['frames'].append(record)
             if not result.allowed:raise RuntimeError('Safety fault: '+result.reason)
             # No command from an over-budget policy cycle reaches the motors.
-            if args.enable_hardware and compute_ms>20:raise RuntimeError('20ms control budget exceeded: %.2fms'%compute_ms)
+            if args.enable_hardware:enforce_control_budget(compute_ms)
             transport.send_action(filtered)
+            record["action_sent"]=True
             print(json.dumps(record),flush=True)
             next_tick+=.02;time.sleep(max(0,next_tick-time.monotonic()))
         report['result']='short_test_completed'
