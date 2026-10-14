@@ -55,11 +55,28 @@ def enforce_pd_effort(target, state, kp, kd, torque_ff):
     return effort
 
 
+def enforce_target_tracking(target, state):
+    error=np.abs(np.asarray(target)-state.joint_pos)
+    if error.shape!=(12,) or not np.isfinite(error).all() or np.max(error)>.45:
+        raise RuntimeError('Requested target tracking error exceeds 0.45rad or is invalid')
+
+
+def startup_gain_factor(elapsed_s):
+    if not np.isfinite(elapsed_s) or elapsed_s<0:
+        raise ValueError('Invalid startup gain elapsed time')
+    ratio=min(elapsed_s/2.,1.)
+    return ratio*ratio*(3.-2.*ratio)
+
+
 def walking_profile(elapsed_s, forward_speed, walking_action_limit=.5):
     """15s trial: 3s settle, 2s ramp, 5s move, 2s ramp down, 3s settle."""
-    if not np.isfinite(elapsed_s) or elapsed_s<0 or forward_speed not in (0.,.05) or walking_action_limit not in (.5,1.):
+    if not np.isfinite(elapsed_s) or elapsed_s<0 or forward_speed not in (0.,.05,.2) or walking_action_limit not in (.5,1.):
         raise ValueError('Invalid protected walking profile')
-    ratio=max(0.,min(1.,(elapsed_s-3.)/2.,(12.-elapsed_s)/2.))
+    if forward_speed==.2:
+        # Enter the training command range briefly; commanded travel integral is 0.3m.
+        ratio=max(0.,min(1.,(elapsed_s-3.)/.5,(5.-elapsed_s)/.5))
+    else:
+        ratio=max(0.,min(1.,(elapsed_s-3.)/2.,(12.-elapsed_s)/2.))
     return [forward_speed*ratio,0.,0.], .2+(walking_action_limit-.2)*ratio if forward_speed else .2
 
 
@@ -105,8 +122,9 @@ def main():
     parser.add_argument('--rear-support-kp',type=float,choices=(30.,35.,40.),default=30.,help='Protected rear gain; requested PD effort is bounded to 20Nm')
     parser.add_argument('--backend',choices=('torchscript','numpy'),default='torchscript')
     parser.add_argument('--hold-seconds',type=int,choices=(3,15,30),default=3)
-    parser.add_argument('--forward-speed',type=float,choices=(0.,.05),default=0.,help='15s protected straight-walking profile, in m/s')
+    parser.add_argument('--forward-speed',type=float,choices=(0.,.05,.2),default=0.,help='15s protected straight-walking profile; 0.2 uses a short 0.3m commanded-travel pulse')
     parser.add_argument('--walking-action-limit',type=float,choices=(.5,1.),default=.5)
+    parser.add_argument('--soft-startup',action='store_true',help='Unvalidated commissioning option: ramp startup gains over 2s, startup Kd2, hold Kd1')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     if args.diagnostic_only and not args.enable_hardware:
@@ -147,6 +165,9 @@ def main():
     if args.ground_support_hold:
         if not args.ground_support_startup:parser.error('Support hold requires the same support startup profile')
         raw['transport']['kp']=[args.rear_support_kp if n.startswith(('RL_','RR_')) else 20. for n in config.robot['joint_names']]
+    if args.soft_startup:
+        raw['transport']['startup_kd']=2.
+        raw['transport']['kd']=[1.]*12
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
                          max_action_delta=.05,runtime_action_limit=args.walking_action_limit if args.forward_speed else .2,require_base_lin_vel_valid=False)
     if args.ground_support_hold:raw['safety']['max_joint_error_rad']=.45
@@ -154,7 +175,7 @@ def main():
     report=dict(model=19499,hardware=args.enable_hardware,protected=args.protected,command=[args.forward_speed,0,0],
                 action_limit=args.walking_action_limit if args.forward_speed else .2,model_validated=False,frames=[],result='not_started',
                 calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration,
-                backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold,rear_support_kp=args.rear_support_kp,requested_pd_effort_limit_nm=20.)
+                backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold,rear_support_kp=args.rear_support_kp,requested_pd_effort_limit_nm=20.,target_tracking_error_limit_rad=.45,default_pose_deviation_limit_rad=raw['safety']['max_joint_error_rad'],soft_startup=args.soft_startup)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     transport=None;restore=False
     control=ROOT/'tools/hardware/sport_mode_control.py'
@@ -204,9 +225,17 @@ def main():
                 return state
             transport.read_state=guarded_read
             real_send_target=transport._send_joint_target
+            startup_gain_started=None
             def guarded_send_target(target,kp=None,kd=None,torque_ff=None):
+                nonlocal startup_gain_started
                 if latest_state is None:raise RuntimeError('No fresh state for requested PD effort check')
                 validate_protected_state(latest_state)
+                enforce_target_tracking(target,latest_state)
+                if args.soft_startup and not report.get('startup_completed',False):
+                    if startup_gain_started is None:startup_gain_started=time.monotonic()
+                    gain_factor=startup_gain_factor(time.monotonic()-startup_gain_started)
+                    kp=np.asarray(transport._kp if kp is None else kp)*gain_factor
+                    kd=np.asarray(transport._kd if kd is None else kd)*gain_factor
                 enforce_pd_effort(target,latest_state,
                     transport._kp if kp is None else kp,
                     transport._kd if kd is None else kd,
@@ -254,7 +283,12 @@ def main():
                           foot_forces=None if state.foot_forces is None else state.foot_forces.tolist(),
                           foot_forces_estimated=None if state.foot_forces_estimated is None else state.foot_forces_estimated.tolist())
             report['frames'].append(record)
-            if not result.allowed:raise RuntimeError('Safety fault: '+result.reason)
+            if not result.allowed:
+                if result.reason=='joint_error_limit':
+                    offsets=np.abs(state.joint_pos-np.asarray(raw['robot']['default_joint_pos']))
+                    index=int(np.argmax(offsets))
+                    report['fault_detail']=dict(check='default_pose_deviation',joint=raw['robot']['joint_names'][index],deviation_rad=float(offsets[index]),limit_rad=raw['safety']['max_joint_error_rad'])
+                raise RuntimeError('Safety fault: '+result.reason)
             # No command from an over-budget policy cycle reaches the motors.
             if args.enable_hardware and args.hold_seconds==3:
                 enforce_control_budget(compute_ms)

@@ -91,6 +91,32 @@ def test_walking_profile_settles_ramps_and_returns_to_zero():
     with pytest.raises(ValueError):tool.walking_profile(7,.05,2.)
 
 
+def test_training_speed_pulse_is_bounded_and_returns_to_zero():
+    assert tool.walking_profile(0,.2,1.)==([0.,0.,0.],.2)
+    assert tool.walking_profile(4,.2,1.)==([.2,0.,0.],1.)
+    assert tool.walking_profile(5,.2,1.)==([0.,0.,0.],.2)
+    time_points=np.linspace(0,15,15001)
+    travel=sum(tool.walking_profile(float(t),.2,1.)[0][0] for t in time_points)*.001
+    assert travel==pytest.approx(.3,abs=1e-6)
+
+
+def test_target_tracking_is_distinct_from_default_pose_deviation():
+    s=state();s.joint_pos=np.full(12,.5)
+    tool.enforce_target_tracking(np.full(12,.6),s)
+    with pytest.raises(RuntimeError,match='tracking'):tool.enforce_target_tracking(np.zeros(12),s)
+    with pytest.raises(RuntimeError):tool.enforce_target_tracking(np.full(12,np.nan),s)
+
+
+def test_soft_gain_ramp_does_not_step_to_full_stiffness():
+    assert tool.startup_gain_factor(0)==0.
+    assert tool.startup_gain_factor(1)==.5
+    assert tool.startup_gain_factor(2)==1.
+    assert tool.startup_gain_factor(5)==1.
+    points=[tool.startup_gain_factor(float(x)) for x in np.linspace(0,2,101)]
+    assert all(0<=x<=1 for x in points)
+    assert all(a<=b for a,b in zip(points,points[1:]))
+
+
 @pytest.mark.parametrize('fault',['velocity_invalid','too_fast','no_contact','travel','lateral','heading'])
 def test_walking_faults_stop_motion(fault):
     s=state();s.base_lin_vel=np.zeros(3);s.contact_count=4
