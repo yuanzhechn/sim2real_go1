@@ -94,6 +94,12 @@ def main():
             start=time.perf_counter();scripted(sample);times.append((time.perf_counter()-start)*1000)
     args.output.mkdir(parents=True,exist_ok=True)
     policy=args.output/'wtw_student.ts';scripted.save(str(policy))
+    interface=dict(env={key:env[key] for key in ('num_observations','num_observation_history','observe_two_prev_actions','observe_clock_inputs','observe_vel')},
+        obs_scales=config['obs_scales'],control=control,normalization=config['normalization'],
+        commands={'num_commands':config['commands']['num_commands'],'pacing_offset':config['commands'].get('pacing_offset',False)},
+        init_state={'default_joint_angles':config['init_state']['default_joint_angles']},
+        control_dt=config['sim']['dt']*control['decimation'])
+    (args.output/'interface.json').write_text(json.dumps(interface,indent=2)+'\n')
     report=dict(source_url='https://github.com/Improbable-AI/walk-these-ways',
         source_commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),
         checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),

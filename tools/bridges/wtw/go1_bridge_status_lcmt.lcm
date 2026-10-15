@@ -1,0 +1,24 @@
+struct go1_bridge_status_lcmt {
+    const int32_t FAULT_NONE=0;
+    const int32_t FAULT_NO_COMMAND=4;
+    const int32_t FAULT_STALE_COMMAND=5;
+    int64_t timestamp_us;
+    int64_t sequence;
+    int32_t fault;
+    int8_t armed;
+    int8_t simulated;
+    float battery_voltage;
+    float max_motor_temperature;
+    float command_age_ms;
+    int64_t cycles;
+    int64_t missed_deadlines;
+    float q[12];
+    float dq[12];
+    float rpy[3];
+    float omega[3];
+    float quat[4];
+    float foot_force[4];
+    float state_age_ms;
+    int8_t emergency_stop;
+    int8_t r2;
+}
