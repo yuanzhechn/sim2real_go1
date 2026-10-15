@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-15",
+  "model": 19499,
+  "hardware_locomotion_validated": false,
+  "controller": "existing Python protected commissioning, not WTW C++ bridge",
+  "profile": {
+    "startup_seconds": 16,
+    "front_kp": 20,
+    "rear_kp": 40,
+    "soft_startup": true,
+    "backend": "numpy",
+    "tracking_limit_rad": 0.45,
+    "requested_effort_limit_nm": 20
+  },
+  "stand": {
+    "result": "short_test_completed",
+    "startup_completed": true,
+    "policy_frames": 150,
+    "hold_seconds": 3,
+    "command": [
+      0,
+      0,
+      0
+    ],
+    "battery_v": 21.600000381469727,
+    "max_compute_ms": 12.557959999867307,
+    "operator_report": "是，自己站稳且没有明显振动",
+    "log": "logs/commissioning/stand_19499_20261015_confirmed.json"
+  },
+  "walking_attempt": {
+    "result": "aborted",
+    "reason": "启动过渡关节未跟随目标: error=0.452 rad joint=FR_calf_joint q=-2.552 target=-2.100",
+    "startup_trace_elapsed_s": 8.20483467000031,
+    "policy_frames": 0,
+    "forward_command_sent": false,
+    "battery_v": 21.600000381469727,
+    "log": "logs/commissioning/walk_19499_20261015_005.json"
+  },
+  "comparison": {
+    "stand_initial_q": [
+      0.48104941844940186,
+      -0.3704758584499359,
+      0.4792327284812927,
+      -0.421039342880249,
+      1.0951987504959106,
+      1.1581155061721802,
+      1.084601640701294,
+      1.1332879066467285,
+      -2.6968801021575928,
+      -2.7392687797546387,
+      -2.6870298385620117,
+      -2.7085471153259277
+    ],
+    "walking_attempt_initial_q": [
+      0.38276851177215576,
+      -0.40602168440818787,
+      0.3160368502140045,
+      -0.31488630175590515,
+      1.3505594730377197,
+      1.3572810888290405,
+      1.1920263767242432,
+      1.2003223896026611,
+      -2.7691423892974854,
+      -2.747342586517334,
+      -2.794050931930542,
+      -2.7722508907318115
+    ],
+    "finding": "Initial poses differ; same gain and interpolation settings succeeded once and failed during the next startup. Cause not isolated; no evidence of walking success."
+  },
+  "exit": "Both runs exited, requested damping and restored factory sport mode; no policy process remained."
+}
