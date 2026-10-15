@@ -1,0 +1,44 @@
+{
+  "source_url": "https://github.com/Improbable-AI/walk-these-ways",
+  "source_commit": "0e7236bdc81ce855cbe3d70345a7899452bdeb1c",
+  "checkpoint_sha256": "d1542b0b8c7b767753a286f1cbabe5b4dc86e67611fb95844e870b3c61f8869e",
+  "policy_sha256": "d1647aebaf340b0d7dbd009b6fcf88ae4d615074cf34a2d6c0d231cb6d0559e8",
+  "observation_dim": 70,
+  "history_length": 30,
+  "history_dim": 2100,
+  "latent_dim": 2,
+  "action_dim": 12,
+  "command_dim": 15,
+  "observe_clock_inputs": true,
+  "observe_vel": false,
+  "observe_two_prev_actions": true,
+  "action_scale": 0.25,
+  "hip_scale_reduction": 0.5,
+  "stiffness": {
+    "joint": 20.0
+  },
+  "damping": {
+    "joint": 0.5
+  },
+  "default_joint_angles": {
+    "FL_hip_joint": 0.1,
+    "RL_hip_joint": 0.1,
+    "FR_hip_joint": -0.1,
+    "RR_hip_joint": -0.1,
+    "FL_thigh_joint": 0.8,
+    "RL_thigh_joint": 1.0,
+    "FR_thigh_joint": 0.8,
+    "RR_thigh_joint": 1.0,
+    "FL_calf_joint": -1.5,
+    "RL_calf_joint": -1.5,
+    "FR_calf_joint": -1.5,
+    "RR_calf_joint": -1.5
+  },
+  "control_dt": 0.02,
+  "max_export_error": 0.0,
+  "mean_inference_ms": 9.908220349999132,
+  "p99_inference_ms": 13.342458559915253,
+  "camera_required_by_actor": false,
+  "hardware_validated": false,
+  "note": "Offline inference only; requires WTW history, command/clock and joint-order adapters. Not model_19499."
+}
