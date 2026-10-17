@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-17",
+  "model": 19499,
+  "controller": "protected Python commissioning, not WTW C++ bridge",
+  "hardware_locomotion_validated": false,
+  "stand": {
+    "result": "short_test_completed",
+    "frames": 1500,
+    "duration_s": 29.989422596999987,
+    "deadline_misses": 0,
+    "battery_v": 24.31999969482422,
+    "max_compute_ms": 17.173775999992813,
+    "max_roll_rad": 0.0093729542568326,
+    "max_pitch_rad": 0.017652980983257294,
+    "min_contacts": 4,
+    "operator_report": "自行站稳、后膝盖离地、无明显振动",
+    "log": "logs/commissioning/stand_19499_20261017_30s.json"
+  },
+  "walking_attempt": {
+    "result": "aborted",
+    "reason": "启动过渡关节未跟随目标: error=0.450 rad joint=FR_calf_joint q=-2.552 target=-2.102",
+    "policy_frames": 0,
+    "forward_command_sent": false,
+    "battery_v": 24.256000518798828,
+    "log": "logs/commissioning/walk_19499_20261017_005.json"
+  },
+  "tracking_aware_attempt": {
+    "result": "aborted",
+    "reason": "跟踪感知起身超时，未到达默认姿态",
+    "policy_frames": 0,
+    "forward_command_sent": false,
+    "battery_v": 24.128000259399414,
+    "pause_rad": 0.35,
+    "resume_rad": 0.3,
+    "hard_tracking_limit_rad": 0.45,
+    "max_startup_seconds": 28,
+    "last_packet_max_tracking_rad": 0.34171414375305176,
+    "log": "logs/commissioning/walk_19499_20261017_tracking_005.json",
+    "finding": "Progress paused near interpolation alpha 0.332; error remained near 0.342rad and motion stopped. Waiting alone did not complete startup. This experiment is not a validated fix."
+  },
+  "software_tests": {
+    "pytest_passed": 84,
+    "plant_tests": "Transient stall/recovery, permanent stall timeout, estop during pause, unexpected motion hard limit"
+  },
+  "final_state": "Both attempted walks sent no policy or forward commands; damping requested and factory sport mode restored; no policy process remained."
+}

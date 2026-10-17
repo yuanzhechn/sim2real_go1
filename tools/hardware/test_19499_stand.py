@@ -125,6 +125,7 @@ def main():
     parser.add_argument('--forward-speed',type=float,choices=(0.,.05,.2),default=0.,help='15s protected straight-walking profile; 0.2 uses a short 0.3m commanded-travel pulse')
     parser.add_argument('--walking-action-limit',type=float,choices=(.5,1.),default=.5)
     parser.add_argument('--soft-startup',action='store_true',help='Unvalidated commissioning option: ramp startup gains over 2s, startup Kd2, hold Kd1')
+    parser.add_argument('--tracking-aware-startup',action='store_true',help='Pause target progress above 0.35rad, resume below 0.30rad; abort after 28s')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     if args.diagnostic_only and not args.enable_hardware:
@@ -135,6 +136,8 @@ def main():
         parser.error('Walking requires 15s duration and the confirmed rear Kp40 support profile')
     if args.soft_startup and args.startup_duration!=16.:
         parser.error('Revised soft startup requires 16s at fixed cadence; this profile is not hardware validated')
+    if args.tracking_aware_startup and not args.soft_startup:
+        parser.error('Tracking-aware startup requires the fixed-cadence soft startup profile')
     config=load_config(ROOT/'config/robots/unitree5151_19499.yaml')
     original=load_config(ROOT/'config/robots/unitree5151.yaml')
     validate_hardware_config(original)
@@ -171,6 +174,8 @@ def main():
         raw['transport']['startup_kd']=2.
         raw['transport']['kd']=[1.]*12
         raw['transport']['startup_fixed_cadence']=True
+    if args.tracking_aware_startup:
+        raw['transport'].update(startup_tracking_pause_rad=.35,startup_tracking_resume_rad=.30,startup_max_duration_s=28.)
     raw['safety'].update(max_roll_rad=.45,max_pitch_rad=.45,max_joint_velocity_rad_s=6.,
                          max_action_delta=.05,runtime_action_limit=args.walking_action_limit if args.forward_speed else .2,require_base_lin_vel_valid=False)
     if args.ground_support_hold:raw['safety']['max_joint_error_rad']=.45
@@ -180,6 +185,7 @@ def main():
                 calibrated_startup_gain=args.startup_calibrated_gain,startup_duration=args.startup_duration,
                 backend=args.backend,hold_seconds=args.hold_seconds,deadline_misses=0,ground_support_startup=args.ground_support_startup,ground_support_hold=args.ground_support_hold,rear_support_kp=args.rear_support_kp,requested_pd_effort_limit_nm=20.,target_tracking_error_limit_rad=.45,default_pose_deviation_limit_rad=raw['safety']['max_joint_error_rad'],soft_startup=args.soft_startup)
     args.output.parent.mkdir(parents=True,exist_ok=True)
+    report['tracking_aware_startup']=args.tracking_aware_startup
     transport=None;restore=False
     control=ROOT/'tools/hardware/sport_mode_control.py'
     try:

@@ -578,6 +578,18 @@ class UnitreeSdkTransport:
         if duration < 3.0:
             raise ValueError("transport.startup_transition_s 必须至少为 3 秒")
         dt = float(self.config.get("startup_control_dt", 0.02))
+        if not np.isfinite(duration) or not np.isfinite(dt) or dt <= 0:
+            raise ValueError("启动时长和周期必须为有限正数")
+        pause_error = self.config.get("startup_tracking_pause_rad")
+        tracking_aware = pause_error is not None
+        resume_error = float(self.config.get("startup_tracking_resume_rad", 0.30))
+        max_duration = float(self.config.get("startup_max_duration_s", duration))
+        if tracking_aware:
+            pause_error = float(pause_error)
+            hard_limit = float(self.config.get("startup_max_tracking_error", 0.45))
+            if not (np.isfinite(max_duration) and duration <= max_duration <= 28.0
+                    and 0 < resume_error < pause_error < hard_limit <= 0.45):
+                raise ValueError("跟踪暂停要求 0<恢复阈值<暂停阈值<硬限值<=0.45，且时长<=28秒")
         kp_config = self.config.get("startup_kp", 10.0)
         kd_config = self.config.get("startup_kd", 1.0)
         kp = np.broadcast_to(np.asarray(kp_config, dtype=np.float32), (12,)).copy()
@@ -611,8 +623,15 @@ class UnitreeSdkTransport:
             flush=True,
         )
         next_tick = time.monotonic()
+        started = next_tick
         fixed_cadence = bool(self.config.get("startup_fixed_cadence", False))
-        for step in range(steps):
+        max_cycles = max(steps, int(round(max_duration / dt))) if tracking_aware else steps
+        progress = 0
+        paused = False
+        previous_target = initial.copy()
+        for step in range(max_cycles):
+            if tracking_aware and time.monotonic() - started >= max_duration:
+                raise RuntimeError("跟踪感知起身超时，未到达默认姿态")
             state = self.read_state()
             if state.emergency_stop:
                 raise RuntimeError("B 急停触发")
@@ -629,9 +648,21 @@ class UnitreeSdkTransport:
             max_dq = float(np.max(np.abs(state.joint_vel)))
             if max_dq > min(6.0, float(self.safety_config.get("max_joint_velocity_rad_s", 25.0))):
                 raise RuntimeError(f"启动过渡关节速度过高: {max_dq:.3f} rad/s")
-            ratio = (step + 1) / float(steps)
+            ratio = (progress + 1) / float(steps)
             smooth = ratio * ratio * (3.0 - 2.0 * ratio)
             target = initial * (1.0 - smooth) + self._default_joint_pos * smooth
+            if tracking_aware:
+                held_error = float(np.max(np.abs(state.joint_pos - previous_target)))
+                if paused and held_error <= resume_error:
+                    paused = False
+                if not paused and float(np.max(np.abs(state.joint_pos - target))) > pause_error:
+                    paused = True
+                if paused:
+                    target = previous_target.copy()
+                    ratio = progress / float(steps)
+                    smooth = ratio * ratio * (3.0 - 2.0 * ratio)
+            if not paused:
+                progress += 1
             tracking_error = float(np.max(np.abs(state.joint_pos - target)))
             if step > 10 and tracking_error > float(
                 self.config.get("startup_max_tracking_error", 0.45)
@@ -644,9 +675,11 @@ class UnitreeSdkTransport:
                     f"q={state.joint_pos[worst]:.3f} target={target[worst]:.3f}"
                 )
             self._send_joint_target(target, kp=kp, kd=kd, torque_ff=zero_tau)
-            if step % 50 == 0 or step == steps - 1:
+            previous_target = target.copy()
+            if step % 50 == 0 or progress == steps:
                 print(
                     f"startup_step={step:04d} alpha={smooth:.3f} "
+                    f"tracking_paused={paused} "
                     f"dq_max={max_dq:.3f} tracking_error={tracking_error:.3f} "
                     f"contacts={state.contact_count} "
                     f"base_lin_vel={np.array2string(state.base_lin_vel, precision=3)}",
@@ -657,6 +690,10 @@ class UnitreeSdkTransport:
                 time.sleep(max(0.0, next_tick - time.monotonic()))
             else:
                 time.sleep(dt)
+            if progress == steps:
+                break
+        if progress < steps:
+            raise RuntimeError("跟踪感知起身超时，未到达默认姿态")
         self._last_action.fill(0.0)
 
     def finish_policy(self) -> None:
